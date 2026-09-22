@@ -1,0 +1,79 @@
+<!--
+  Moka 结构的最小复现（jsdom 回归用）。
+
+  不是真实页面快照。真实抓取在 tests/fixtures/raw/（已 gitignore，用
+  scripts/capture-fixture.mjs 生成），那份 99KB、含站点全部文案，适合人工比对
+  结构差异，不适合当断言目标。
+
+  结构事实来自 2026-09-22 只读探针（见 AGENTS.md §七）：
+    apply-blocks-*  >  apply-block-*  >  apply-fields-*  >  apply-field-*
+  类名一律保留 "-XXXXXXXX" 后缀形态：引擎的 typeMap 用 startsWith 前缀匹配，
+  真实 hash 换成固定占位值，避免每次抓取都改这个文件。
+
+  刻意覆盖的四个点：
+    1. 复数 wrapper 与单数字段只差一个横线 —— 本文件的字段数会让
+       fieldSel 退回 `[class*=apply-field]` 时立刻失败（8 → 12）。
+    2. 非重复区块（个人信息/求职意向）走 main>>，且"个人网站"重复 → main>>个人网站#2。
+    3. 重复区块（教育背景）两行 → edu[0]>> / edu[1]>>。
+    4. 类型后缀：string_info→text、select_info→select、date_info→date。
+-->
+<div class="apply-blocks-aaaaaaaa">
+
+  <!-- 非重复区块：标题不在 blockSections → main>> -->
+  <div class="apply-block-bbbbbbbb">
+    <div class="title-cccccccc">个人信息</div>
+    <div class="apply-fields-dddddddd">
+      <div class="apply-field-eeeeeeee string_info-ffffffff apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">推荐码</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="请输入" />
+      </div>
+      <div class="apply-field-eeeeeeee select_info-kkkkkkkk apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">是否内推</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="请选择" />
+        <span class="sd-Input-display-value-llllllll"></span>
+      </div>
+      <div class="apply-field-eeeeeeee string_info-ffffffff apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">个人网站</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" />
+      </div>
+    </div>
+  </div>
+
+  <!-- 重复区块：标题前缀匹配 blockSections.edu → 两行分别为 edu[0] / edu[1] -->
+  <div class="apply-block-bbbbbbbb">
+    <div class="title-cccccccc">教育背景添加</div>
+    <div class="apply-fields-dddddddd multi-mmmmmmmm">
+      <div class="apply-field-eeeeeeee string_info-ffffffff apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">学校名称</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" />
+      </div>
+      <div class="apply-field-eeeeeeee date_info-nnnnnnnn apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">就读时间</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" readonly placeholder="就读时间" />
+      </div>
+    </div>
+    <div class="apply-fields-dddddddd multi-mmmmmmmm">
+      <div class="apply-field-eeeeeeee string_info-ffffffff apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">学校名称</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" />
+      </div>
+      <div class="apply-field-eeeeeeee date_info-nnnnnnnn apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">就读时间</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" readonly placeholder="就读时间" />
+      </div>
+    </div>
+    <button class="sd-Button-container-oooooooo"><span class="sd-Button-content-pppppppp">添加</span></button>
+  </div>
+
+  <!-- 非重复区块 + 与 block A 重名的 label → main>>个人网站#2 -->
+  <div class="apply-block-bbbbbbbb">
+    <div class="title-cccccccc">求职意向</div>
+    <div class="apply-fields-dddddddd">
+      <div class="apply-field-eeeeeeee string_info-ffffffff apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">个人网站</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" />
+      </div>
+    </div>
+  </div>
+
+</div>

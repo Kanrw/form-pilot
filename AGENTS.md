@@ -333,9 +333,22 @@ form-pilot/
 `findField` 的定位往返也没在真实页验过（公开 API 没有只读的定位入口，写了就是改表单）——
 它进 Phase 2 的 jsdom 用例。
 
-### Phase 2 · 填写闭环 —— 未开始
+### Phase 2 · 填写闭环 —— 代码已完成，**受控写验收未做**
 
-验收含**受控写**（批量填文本 + 逐个下拉 + 加行 + 回读），必须用户在场监督、停在提交前。
+已落盘：`scripts/capture-fixture.mjs`、`tests/helpers/jsdom-setup.mjs`、`tests/engine.test.mjs`、
+`tests/fixtures/moka.html`、`tests/manual-e2e.md`。
+
+| 验收 | 结果 |
+| --- | --- |
+| `npm test` | 6/6 通过（detect / scan 字段数与单射 / 区块前缀与类型 / fillTexts 分类 / 行级定位 / main 重名） |
+| `node scripts/capture-fixture.mjs --session … --site moka` | `{"ok":true,"fields":59,"pageFields":59,"rootTag":"BODY"}` |
+| 真实页受控写（批量填 + 下拉 + 加行 + 回读） | **未做** |
+
+**受控写必须用户在场监督**，且停在提交前。它是 Phase 2 的真正完成判据，
+`tests/manual-e2e.md` 的 moka 一节就是它的清单。
+
+`package.json` 的 `scripts.test` 从 `node --test tests/` 改成 `node --test`：
+Node 22 把路径参数当模块加载，报 `Cannot find module '…/tests'`。03 §4 里写的调用形式是错的。
 
 ### Phase 3 · 分发与文档 —— 未开始
 
@@ -343,5 +356,7 @@ form-pilot/
 
 ### git
 
-分支 `main`。Phase 1 期间三个快照：仓库基线 → engine/ → scripts/ + 本文档修订。
-提交粒度按"一个可独立回退的单元"，不按时间。
+分支 `main`。提交粒度按"一个可独立回退的单元"，不按时间：
+仓库基线 → engine/ → scripts/ + 文档 → 隐私边界 → Phase 2 测试与 fixture。
+
+**推送前必查**：`git ls-files | grep -E '^private/'` 必须为空。
