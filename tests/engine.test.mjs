@@ -393,3 +393,99 @@ test('R3 setChoice()：点完没有 checked 证据时绝不报成功（not-check
   assert.equal(r.err, 'not-checked');
   assert.deepEqual(r.checked, []);
 });
+
+// ── 3-5 分钟哲学机制化（2026-09-22 北森实战复盘三项修复）────────────
+// ① fillTexts 复合字段拒绝（修复"报 ok 实际填错"的静默缺陷）
+// ② manualTypes：免疫类型在 pickOption/fillDate 入口即拒绝，scan 直接给手动清单
+
+const COMPOSITE_HTML = `<div>
+  <div class="form-item">
+    <div class="form-item__title"><label class="form-item__text">手机号码</label></div>
+    <div class="form-item__control">
+      <span class="phone-prefix">+86</span>
+      <input type="text" class="phone-prefix-input" value="">
+      <input type="tel" class="phone-number-input" value="">
+    </div>
+  </div>
+</div>`;
+
+test('fillTexts 复合字段：多 input 未声明角色选择器时拒绝写入（composite-field）', async () => {
+  const dom = makeDom(COMPOSITE_HTML);
+  // 借 beisen 的 fieldSel 定位（fixture 是 .form-item 形态）；它无 numberInputSel。
+  const ja = loadEngine(dom, { adapter: 'beisen' });
+  const r = JSON.parse(await ja.fillTexts({ '手机号码': '13800001234' }));
+  assert.equal(r.ok, 0);
+  assert.equal(r.failed[0].err, 'composite-field');
+  // 关键：两个 input 都没被写 —— 修复前号码会灌进第一个（+86）框且自检报 ok。
+  for (const i of dom.window.document.querySelectorAll('input')) {
+    assert.equal(i.value, '', '复合字段未被写入任何 input');
+  }
+});
+
+test('fillTexts 复合字段：声明 numberInputSel 后按角色写入，写入与回读同一元素', async () => {
+  const dom = makeDom(COMPOSITE_HTML);
+  const ja = loadEngine(dom, { adapter: 'beisen' });
+  ja.use({ name: 'composite-test', numberInputSel: '.phone-number-input' });
+  const r = JSON.parse(await ja.fillTexts({ '手机号码': '13800001234' }));
+  assert.equal(r.ok, 1, JSON.stringify(r));
+  assert.equal(r.failed.length, 0);
+  assert.equal(dom.window.document.querySelector('.phone-number-input').value, '13800001234');
+  assert.equal(dom.window.document.querySelector('.phone-prefix-input').value, '');
+  assert.equal(r.failed[0], undefined);
+});
+
+// 北森 fixture 需要一个 select 字段来验证 manual 分组 —— editable select 形态
+// （phoenix-select--editable + 内部 input + placeHolder），与真实页一致。
+const BEISEN_SELECT_HTML = `<div>
+  <div class="form-item">
+    <div class="form-item__title"><label class="form-item__text">学历</label></div>
+    <div class="form-item__control">
+      <div class="phoenix-select phoenix-select--editable">
+        <div class="phoenix-select__placeHolder phoenix-select__placeHolder--show">请选择</div>
+        <input class="phoenix-select__input" value="">
+      </div>
+    </div>
+  </div>
+  <div class="form-item">
+    <div class="form-item__title"><label class="form-item__text">可到岗时间</label></div>
+    <div class="form-item__control">
+      <div class="phoenix-select phoenix-select--editable">
+        <div class="phoenix-select__placeHolder phoenix-select__placeHolder--show">请选择</div>
+        <input class="phoenix-select__input" value="">
+      </div>
+    </div>
+  </div>
+</div>`;
+
+test('scan() manual 分组：beisen 的 select/date/cascade 直接归手动清单（不靠散文提醒）', () => {
+  const s = JSON.parse(loadEngine(makeDom(BEISEN_SELECT_HTML), { adapter: 'beisen' }).scan());
+  assert.deepEqual(s.manual, [
+    { id: '学历', type: 'select', reason: 'adapter-manual' },
+    { id: '可到岗时间', type: 'select', reason: 'adapter-manual' },
+  ]);
+  // manual 的空必填不再进 emptyRequired —— 已在手动清单里，不重复计数。
+  assert.deepEqual(s.emptyRequired, []);
+});
+
+test('scan() 无 manualTypes 的适配器（generic）不产生 manual 分组', () => {
+  const s = JSON.parse(loadEngine(makeDom(BEISEN_SELECT_HTML), { adapters: false }).scan());
+  assert.deepEqual(s.manual, []);
+});
+
+test('pickOption 对 manualTypes 类型入口即拒绝（manual-required），不开菜单不等待', async () => {
+  const ja = loadEngine(makeDom(BEISEN_SELECT_HTML), { adapter: 'beisen' });
+  const r = JSON.parse(await ja.pickOption('学历', '博士研究生'));
+  assert.equal(r.ok, false);
+  assert.equal(r.err, 'manual-required');
+  assert.equal(r.type, 'select');
+});
+
+test('generic 适配器（无 manualTypes）pickOption 不受守卫影响，仍走开菜单流程', async () => {
+  const dom = makeDom(BEISEN_SELECT_HTML);
+  const ja = loadEngine(dom, { adapters: false });
+  // 只借 fieldSel/labelSel 让字段可定位，不带 manualTypes —— 隔离守卫变量。
+  ja.use({ name: 'no-manual', fieldSel: '.form-item', labelSel: 'label' });
+  const r = JSON.parse(await ja.pickOption('学历', '博士研究生'));
+  // 没有菜单可开 → menu-not-open（既有路径），而不是 manual-required。
+  assert.equal(r.err, 'menu-not-open');
+});

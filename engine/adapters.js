@@ -128,6 +128,14 @@ window.__jaAdapters = window.__jaAdapters || {
     radioGroupSel: '.phoenix-radio-group',
     radioItemSel: '.phoenix-radio-group__radioItem',
     radioCheckedSel: '.phoenix-radio--checked',
+
+    // manual 机制（2026-09-22 L3 实战复盘，~25 轮通道全试无效，见 AGENTS.md §五）：
+    // editable select（phoenix-select--editable）对 native setter / 真实 click / key_type /
+    // CDP insertText / CDP 鼠标 / 合成五件套全部免疫——菜单打不开、值写不进。
+    // 日期下拉与区域级联都是这个形态。本页普通下拉的值全部来自站内简历解析器，
+    // pickOption 在北森从未验证成功——与其再烧 25 轮，入口直接快速失败归手动。
+    // 唯一验证过的选择类通道是 setChoice（radio），choice 不在清单里。
+    manualTypes: ['select', 'date', 'cascade'],
   },
 
   // ── 通用探针：全部留空，即引擎内置默认值（fieldSel=null 走 input 就近容器，etc.）──

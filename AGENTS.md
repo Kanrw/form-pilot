@@ -323,17 +323,20 @@ blockSections    edu 教育背景 / intern 实习经历 / proj 项目经验 / sc
 __ja.version                                   → '0.1.0'（三处一致，见 §十 同步方案）
 __ja.use(adapter)                              → adapter.name（Object.assign，可重复调用）
 __ja.detect()                                  → 'moka' | 'beisen' | 'generic'
-__ja.scan()                                    → {total, fields:[{id,block,label,type,required,value}]}
+__ja.scan()                                    → {total, fields:[{id,block,label,type,required,value}],
+                                                  manual:[{id,type,reason:'adapter-manual'}],
+                                                  emptyRequired:[id]}
 __ja.readAll()                                 → [{id,block,label,type,value}]
 __ja.addRow(kind)                              → {ok,kind,from,to,added} | {ok:false,err:'section-not-found'
                                                   |'add-button-not-found'|'row-not-added'|...}
 __ja.fillTexts(map)                            → {ok:number, failed:[{id,phase,err,attempted,final}],
                                                   retried:[id]}
 __ja.pickOption(id, text, {search=true})       → {ok,value} | {ok:false,err:'field-not-found'
-                                                  |'menu-not-open'|'option-not-found'|'item-detached'}
+                                                  |'manual-required'|'menu-not-open'
+                                                  |'option-not-found'|'item-detached'}
 __ja.fillDate(id, 'YYYY-MM-DD')                → {ok,wrote,after,unfilledInputs} | {ok:false,err:
-                                                  'field-not-found'|'not-a-date-field'|'bad-ymd'
-                                                  |'select-based-date'
+                                                  'field-not-found'|'not-a-date-field'|'manual-required'
+                                                  |'bad-ymd'|'select-based-date'
                                                   |'no-date-inputs'|'input-count-mismatch'
                                                   |'readonly-unverifiable'|'not-stuck'}
 __ja.fillMonthRange(id, from, to)              → {ok,from,to,picks,assumed?,displayAfter?} | {ok:false,err:
@@ -350,6 +353,17 @@ __ja.fillMonthRange(id, from, to)              → {ok,from,to,picks,assumed?,di
   却没人能跑 `--check` 断言"的状态 —— 版本对齐跟 Phase 3 一起做。
 - `type` 枚举：`text | textarea | file | select | date | cascade | choice | unknown`。
   `fillTexts` 只处理 `text`/`textarea`，其余跳过并在 `failed[].err` 里归类为 `not-text:<type>`。
+- **3-5 分钟哲学的机制化（2026-09-22 晚，北森复盘三项修复，82 例测试）**：
+  1. **manualTypes**（适配器声明，如北森 `['select','date','cascade']`）——scan() 直接把
+     这些类型归入 `manual` 清单；pickOption/fillDate 在**入口**即报 `manual-required`
+     快速失败，不进入开菜单/等待循环。杜绝"换个通道再试 25 轮"复发。
+     `emptyRequired` 只收 manual 之外的空必填，两个清单合起来就是使用者的人工待办。
+  2. **复合字段拒绝写入**（修复"报 ok 实际填错"的静默缺陷）：盒内有多个可见 input 且
+     适配器未声明 `numberInputSel`（角色选择器）时，fillTexts 报 `composite-field` 拒写，
+     一个字节都不落。声明了角色选择器则写入与回读走同一个 `pickInput()`——
+     自检不再"两边错到一起"。Moka 手机号未实测类名，**不声明**——它会明确失败而不是静默填错。
+  3. **解析值沿用 + 核对**（见 §七修订）：scan 的 `emptyRequired`/`manual` 分组就是
+     提交前的核对清单，取代"解析输出一律不用"的旧策略。
 - **日期字段多为"年/月/日"若干文本框，不是下拉 —— 先试直填，别默认走 `pickOption`。**
   缺月份的按用户规则用 `01`（`2022` → `2022-01`），补了什么在 `assumed` 里报出。
   区间字段只填起始、结束留空即"至今"，未填个数在 `unfilledInputs` 里报出。
@@ -461,37 +475,29 @@ Plan 01 R2 原本只对 `main` 前缀消歧，实测发现非重复区块之间�
 > 反过来做，等于把自己刚填的内容交给解析器覆盖。解析是异步的，实测 **4 秒内**就已稳定
 > （旧记的"12 秒后仍在变动"是保守观察）。
 
-### ★ 站内解析的输出一律不用（用户决策，2026-09-22）
+### ★ 站内解析输出：逐字段核对后可沿用（用户决策修订，2026-09-22 晚）
 
-**规则**：上传简历只做两件事 —— 满足必填的文件槽位、让经历行被 materialize 出来。
-**解析填出来的值一个都不作为依据**；所有字段一律从档案重新决定，
-**包括解析认为已经填好的那些**。
+> 旧版（Moka 实测后）：「解析的输出一律不用」。北森实战（同日，粤芯）推翻了一刀切：
+> 解析自动填对约 60% 字段（姓名/性别/手机/教育三段/项目一/技能名与掌握程度），
+> 引擎实际只补解析不覆盖的 22 个文本字段（批填全中）。两个站点数据相反，
+> 说明**解析质量是站点变量，不是常量** —— 策略从"不用"改为"沿用 + 核对"。
 
-依据（本次投递实测，89 个字段）：
+**规则（3-5 分钟哲学：把轮次花在增量上，不花在重填上）**：
 
-| 解析的贡献 | 数量 |
-| --- | --- |
-| 填对、我沿用的 | **6** 个（姓名 / 性别 / 邮箱 / `edu[0]` 学历 / 三段教育的年份）≈ **7%** |
-| 填错或残缺、我必须覆盖的 | 4 个（`edu[1]` 学历填成「博士」，实际是硕士；`edu[2]` 就读时间填成港大访学期间） |
-| 该填却完全没填的 | `学校名称`／`院系`／`专业名称`／`受教育类型`／`GPA` —— **三段教育全空** |
+1. 上传简历仍是第一步，等解析稳定后 rescan（字段 53 → 68）。
+2. **解析值默认沿用**，不再全量重填。
+3. 提交前核对靠 scan 的两个分组（2026-09-22 机制化）：
+   `emptyRequired`（空必填，必须处理）+ `manual`（适配器免疫类型，直接归手动）。
+   核对动作 = readAll 输出与档案逐字段比对，使用者过目后再提交。
+4. **教育行的口径污染警告保留**（Moka 实测）：解析按简历的切法生成行
+   （本科/硕博连读/境外交流），档案的切法是（本科/硕士/博士）。
+   行切法不一致时**以档案为准重排**，不要围绕解析的切法分析。
+5. 日期类解析痕迹仍不可信（Moka 实测：写入的 `01` 被应用解成"暂无选项"，
+   input.value 有值、应用侧为空）——日期字段核对时以应用侧显示为准，不看 input.value。
 
-用户判断（原话）："就算上传了，你不是还得重复检测字段是否正确，那这样和直接填写没有任何区别。"
-**同意。** 它省掉的工作量约 7%，换来三样成本：
-
-1. **结构依赖** —— 上传必须第一步，且必须等异步解析稳定，否则字段 ID 漂移；
-2. **覆盖风险** —— 解析会清掉已填字段，顺序错了就白填；
-3. **口径污染（本次真踩到，也最隐蔽）** —— 解析是按**简历**的切法生成教育行的
-   （本科 / 硕博连读 / 香港大学访问），而档案的切法是（本科 / 硕士 / 博士）。
-   我一度是**围绕它给的切法**去分析"这三行该填什么"的。
-   解析结果会诱导你用它的口径去理解表单 —— 这比填错一个字段难发现得多。
-
-**不做什么**：不取消上传。`上传简历` 是必填文件槽位，而且**正是解析把经历从 1 行扩成 3 行** ——
-不传就得改用尚未验收的 `addRow` 自己加行。所以继续传、继续等它稳定，**只是不读它的值**。
-
-**执行上的差别**：映射表**完全由档案生成**，不为"解析已经填了"跳过任何字段；
-`readAll()` 只用于核对最终结果，**不用来判断"哪些还需要填"**。
-补充一条日期类的实测（同源）：解析痕迹里的日期同样不可信 —— 写入的 `01` 被应用解成
-"暂无选项"，`input.value` 看着有值、应用侧却是空的。所以连"它填好的日期"也要按同一套流程重来。
+Moka 旧数据留档（89 字段那次）：解析填对 6 个（≈7%）、填错 4 个、
+教育三段该填的全空。那次"沿用不划算"的判断在当时成立；机制化之后，
+沿用与核对的成本由 scan 分组兜底，不再依赖会话现场判断。
 
 **未验收**：`addRow` 之后的 ID 稳定性（加一行 → 出现 `edu[1]>>` 且 `edu[0]>>` 不变）。
 

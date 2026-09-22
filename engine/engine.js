@@ -70,6 +70,14 @@ const A = {
   radioGroupSel: null,     // R3 单选组容器（北森: .phoenix-radio-group）
   radioItemSel: null,      // 组内选项（北森: .phoenix-radio-group__radioItem）
   radioCheckedSel: null,   // 选中态标记（北森: core 上的 .phoenix-radio--checked）
+  // 3-5 分钟哲学的机制化（2026-09-22 北森实战复盘）：
+  // manualTypes —— 这些 type 的字段直接归手动，pickOption/fillDate 入口即报
+  // manual-required 快速失败，杜绝"换个通道再试 25 轮"复发。null = 不限制。
+  manualTypes: null,
+  // 复合字段（如 +86 + 号码框）里真正承接值的那一个 input 的角色选择器。
+  // 未声明而盒内有多个可见 input 时，fillTexts 拒绝写入（composite-field）——
+  // 宁可明确失败，不要"写入回读都指向第一个、自检失效"的静默错（AGENTS.md §八）。
+  numberInputSel: null,
 };
 
 // ── 字段与类型 ──────────────────────────────────────────
@@ -167,6 +175,19 @@ function groupCount(secEl) {
 }
 
 // ── 取值 ────────────────────────────────────────────────
+// 写入目标的统一定位：单 input 盒直接用；多 input 盒（复合字段）只有适配器声明了
+// 角色选择器（numberInputSel）才允许定位，否则 composite —— fillTexts 会拒绝写入。
+// 修复"手机号灌进 +86 框"的关键：写入与回读必须走同一个函数，不能再各自 querySelector。
+function pickInput(box) {
+  const inputs = [...box.querySelectorAll(A.textInputSel)].filter((e) => e.offsetHeight > 0);
+  if (inputs.length <= 1) return { inp: inputs[0] || null, composite: false };
+  if (A.numberInputSel) {
+    const role = box.querySelector(A.numberInputSel);
+    if (role && inputs.includes(role)) return { inp: role, composite: false };
+  }
+  return { inp: inputs[0] || null, composite: true };
+}
+
 function readSelect(box) {
   if (A.valueSel) {
     const v = box.querySelector(A.valueSel);
@@ -364,7 +385,14 @@ window.__ja = {
       required: isRequired(e.box),
       value: trunc(valueOf(e.box, e.type)),
     }));
-    return j({ total: list.length, fields: list });
+    // 3-5 分钟哲学的分组输出（2026-09-22 北森复盘）：外层 LLM 一次 scan 就拿到
+    // 「自动填什么 / 空必填必须处理 / 哪些类型直接归手动」，不再逐字段试错。
+    const manualSet = A.manualTypes || [];
+    const manual = list.filter((f) => manualSet.includes(f.type))
+      .map((f) => ({ id: f.id, type: f.type, reason: 'adapter-manual' }));
+    const emptyRequired = list.filter((f) => f.required && !f.value && !manualSet.includes(f.type))
+      .map((f) => f.id);
+    return j({ total: list.length, fields: list, manual, emptyRequired });
   },
 
   readAll() {
@@ -397,7 +425,10 @@ window.__ja = {
       if (!box) { row.err = 'field-not-found'; results.push(row); continue; }
       const type = typeOf(box);
       if (type !== 'text' && type !== 'textarea') { row.err = 'not-text:' + type; results.push(row); continue; }
-      const inp = box.querySelector(A.textInputSel);
+      const { inp, composite } = pickInput(box);
+      // 复合字段（+86 + 号码框这类）：不声明角色选择器就写，等于"报 ok 实际填错"。
+      // 直接失败并归类，让调用方改适配器或归入手动 —— 3-5 分钟哲学：不赌。
+      if (composite) { row.err = 'composite-field'; results.push(row); continue; }
       if (!inp) { row.err = 'no-input'; results.push(row); continue; }
       setNativeValue(inp, value);
       row.ok = inp.value === value;
@@ -413,24 +444,24 @@ window.__ja = {
     for (const r of results) {
       if (!r.ok) continue;
       const box = findField(r.id);
-      const inp = box && box.querySelector(A.textInputSel);
-      const now = inp ? inp.value : '';
+      const pick = box && pickInput(box);
+      const now = pick && pick.inp ? pick.inp.value : '';
       if (now !== r._v) swallowed.push(r);
       else r.final = trunc(now);
     }
     for (const r of swallowed) {
       const box = findField(r.id);
-      const inp = box && box.querySelector(A.textInputSel);
-      if (!inp) continue;
-      setNativeValue(inp, r._v);
+      const pick = box && pickInput(box);
+      if (!pick || !pick.inp) continue;
+      setNativeValue(pick.inp, r._v);
       retried.push(r.id);
     }
     if (swallowed.length) {
       await sleep(400);
       for (const r of swallowed) {
         const box = findField(r.id);
-        const inp = box && box.querySelector(A.textInputSel);
-        const now = inp ? inp.value : '';
+        const pick = box && pickInput(box);
+        const now = pick && pick.inp ? pick.inp.value : '';
         r.final = trunc(now);
         r.ok = now === r._v;
         if (!r.ok) { r.phase = 'verify'; r.err = 'value-not-stuck-after-retry'; }
@@ -447,6 +478,12 @@ window.__ja = {
     const search = !opts || opts.search !== false;
     const box = findField(id);
     if (!box) return j({ ok: false, err: 'field-not-found', id });
+    // manual 机制（2026-09-22 北森复盘）：适配器判定的免疫类型在入口即拒绝，
+    // 不进入开菜单/等待循环 —— 杜绝"换个通道再试 25 轮"复发。
+    const mt = typeOf(box);
+    if (A.manualTypes && A.manualTypes.includes(mt)) {
+      return j({ ok: false, err: 'manual-required', id, type: mt, hint: '该类型已由适配器归入手动清单（免疫实测记录见 AGENTS.md）' });
+    }
 
     const { menu, freshCount } = await openMenuFor(box.querySelector(A.textInputSel) || box);
     if (!menu) return j({ ok: false, err: 'menu-not-open', id, hint: 'fallback-cdp' });
@@ -527,6 +564,10 @@ window.__ja = {
     if (!box) return j({ ok: false, err: 'field-not-found', id });
     const type = typeOf(box);
     if (type !== 'date') return j({ ok: false, err: 'not-a-date-field', id, type });
+    // manual 机制：与 pickOption 同一入口守卫（北森日期下拉免疫，见 AGENTS.md §五）。
+    if (A.manualTypes && A.manualTypes.includes('date')) {
+      return j({ ok: false, err: 'manual-required', id, type, hint: '日期类已由适配器归入手动清单' });
+    }
 
     // 选择式日期控件（month-range-select）必须先挡掉，而且要在**动手写之前**挡。
     // 命名失败（2026-09-22 Moka 实测）：「毕业时间（月）」「英语证书获得时间」= 2 个下拉的
