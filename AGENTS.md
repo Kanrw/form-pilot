@@ -401,3 +401,46 @@ Node 22 把路径参数当模块加载，报 `Cannot find module '…/tests'`。
 仓库基线 → engine/ → scripts/ + 文档 → 隐私边界 → Phase 2 测试与 fixture。
 
 **推送前必查**：`git ls-files | grep -E '^private/'` 必须为空。
+
+## 十二、jobmatch 模组（岗位筛选）
+
+独立于引擎的功能模组，2026-09-22 落地并在真实站点跑通。它回答"值不值得投"，
+引擎回答"怎么填" —— 两者不共享代码，只通过"筛选结论 → 投放版本 → fillTexts(map)"衔接。
+
+**文件**
+
+| 文件 | 职责 |
+| --- | --- |
+| `jobmatch/schema.mjs` | 枚举（GATE / STATUS / VERDICT）、文本归一化、JD 门槛线索抽取 |
+| `jobmatch/filter.mjs` | 确定性核心：档案→事实、档案→词典、四道闸门、命中、四档结论、排序 |
+| `jobmatch/sites.mjs` | 站点注册表（当前 `feishu`，已实测）+ 无匹配时的通用嗅探 |
+| `jobmatch/fetch.mjs` | 桥接编排：network start → navigate → list → detail → 解析 |
+| `scripts/match.mjs` | CLI：`--fetch` / `--screen` / `--sites` |
+
+**通道是 network，不是 DOM。** 实测原因：记忆科技飞书站的 `.positionItem` 卡片里只有岗位职责，
+`requirement`（学历 / 专业 / 年限）完全缺失；而门槛恰恰写在 requirement 里。
+直连站点 API 也不行 —— 请求带 `_signature`，缺了会被网关丢到"字节跳动猎头平台"的 fallback 页（状态码还 200）。
+所以借页面自己发出的 JSON。`?limit=100` 一次取全 75 条，不需要翻页。
+
+**四道闸门**：地点 / 学历 / 年限 / 专业方向，逐项 `pass / fail / unknown`。
+`unknown` 既不淘汰也不放行；任一 `fail` 直接落到"暂不建议投递"，不被命中数加权抵消。
+不产出百分比分数（照 asu-skill `job-match` 的规则，伪精确分数是误导）。
+
+**四档结论**：`建议投递`（无 unknown 且命中 ≥2）/ `补充材料后投递`（命中 ≥1）/ `谨慎投递`（无命中）/ `暂不建议投递`（有 fail）。
+"已匹配 / 表达缺口 / 证据不足"这类判定需要对着简历原文看，留给对话侧，代码不代劳。
+
+**踩过并已修的三个坑**（各有单测盯着，见 `tests/jobmatch.test.mjs` 的 ★）
+
+1. `splitTerms` 不拆括号时，"<示例研究方向>（半导体缺陷…）"整串进词典 → 词典只剩 2 个词 → 全场 0 命中。
+2. 专业门槛正则只写"专业"二字会命中"应用专业方法或工具"这类句子 → HRBP 岗被判专业不符。
+   现在前置式必须带显式标签或冒号，后置式认"…等相关专业"。
+3. `skills.category`（"编程 / 工具"）进词典 → 75 个岗位里 38 个靠"工具""编程"假命中。现在只用 `content`。
+
+**已知边界（不是 bug）**
+
+- `private/profile.md` 的节编号与 schema 顺序错位（md 第 5 节是技能，schema 第 5 节是实习经历），
+  `--import` 会整段错位；当前 `--screen` 是现场导入不落盘，所以技能段与求职意向段为空 →
+  词典偏小、意向城市 unknown。CLI 会把这类告警打出来，修档请走 `--ui` 或修正 md 编号。
+- 列表接口不含岗位详情页 URL，`/position/<id>/` 实测是 404 页 → `url` 留空，不猜拼法；
+  交接靠岗位 `id` + 在页面上打开。
+- 词典只来自档案自己写下的词。档案没写的技能不会凭空命中，这是刻意的。
