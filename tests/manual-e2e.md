@@ -128,3 +128,17 @@ L3 校准清单（首次受控写时做，然后回填本节）：
 - 盒子选择器必须 `[class~="atsx-form-item"]`（完整词）：裸 `[class*=atsx-form-item]` 实测命中 156 个节点（真盒子 28 个）。
 - `<label>` 是干净的字段名事实源；`[class*=fieldName]` 的 textContent 会混入已填值（如"意向城市东莞"），不可用。
 - 「个人证件」是 `id-card-wrap`（never 类，永不自动填）。
+
+### feishu L3 受控写结果（2026-09-22 实测回填）
+
+| 项 | 结果 |
+| --- | --- |
+| fillTexts 文本 10 个 | 全部落值、回读一致（atsx-input 走 native setter 无障碍） |
+| pickOption 性别/国籍/政治面貌 | ✔（校准 menuSel 后） |
+| 学校名称（搜索型下拉） | ✔ 输入关键字→联想→点匹配项，需专用路径 |
+| 学历/直系亲属/渠道/排名 | ✔ 手动事件序列（input 上 mousedown/focus/mouseup/click → 点可见项） |
+| pickOption menu-not-open 复发 | 残留菜单 + closeMenus 后引擎 openMenuFor 仍失败 → 手动事件序列可解，**pickOption 在本站不可靠，适配器注释已写明** |
+| 期望工作地点 | ✗ 跳过：菜单 available 恒为空（疑似级联，需真实鼠标） |
+| 起止时间 ×2 | ✗ 跳过：`atsx-date-picker-period-month` = 隐藏 input + 日历弹层，与 Moka 4 下拉完全不同，fillMonthRange 不适用，留手动 |
+| 上传简历 | ✔ bridge `upload {selector:"input[type=file]", files:[绝对路径]}` |
+| scan 报 `<有值>` 的 date | **是误读**：valueOf 把 placeholder 文案当成值。回读空 → 别信 scan 的 date 有值 |

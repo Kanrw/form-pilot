@@ -88,10 +88,13 @@ window.__jaAdapters = window.__jaAdapters || {
     labelSel: 'label',
     // 字段名有两套：<label>（干净，26 个）与 [class*=fieldName]（textContent 会混入已填值，
     // 如"意向城市东莞"—— 不可作 label 事实源）。
-    // 菜单三件套未验证（打开菜单属页面状态变更，留给首次受控写时校准并回填）：
-    menuSel: null,
-    itemSel: null,
-    valueSel: null,
+    // 菜单三件套（2026-09-22 L3 受控写校准）：
+    // ★ 飞书的下拉菜单是**常驻 DOM**（靠 class 控显隐，不是用后即弃的 body portal）——
+    //   所以 openMenuFor 靠"新出现的菜单"判断会失败，需配合对 select 内 input 的
+    //   mousedown/focus/mouseup/click 事件序列；菜单项文本跨字段全局唯一，按文本命中安全。
+    menuSel: '[class*="atsx-select-dropdown"]',
+    itemSel: '[class*="atsx-select-dropdown-menu-item"]',
+    valueSel: '[class*="atsx-select-selection"]',
 
     // 分区容器实测有 title（申请信息 / 附件简历 / …），但区块标题元素与 kind 的
     // 对应关系尚未核对 —— 首版不声明 blockSections，重复 label（起止时间×2）靠 main>>#n 消歧。
