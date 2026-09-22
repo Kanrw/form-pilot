@@ -388,6 +388,68 @@ window.__ja = {
     return j({ ok: norm(value) === norm(optionText) || value.indexOf(optionText) >= 0, id, value: trunc(value) });
   },
 
+  // 日期直填（R4，2026-09-22 由用户触发：多数站点的日期是若干文本框而非下拉，可以直填）。
+  //
+  // 输入框分配规则（实测 Moka 两种形态）：
+  //   · 1 个 input            → 整串写入（"2000-02-01"）
+  //   · 2 个 input（年/月）    → 依次写 年、月
+  //   · 3 个 input（年/月/日） → 依次写 年、月、日
+  //   · 4 个 input（年月年月） → 只填起始，结束留空即"至今"；余下的在 unfilledInputs 里报出
+  //
+  // ★ 只读 input 单独处理：程序化写入能把值粘在 DOM 上，但**无法证明应用状态接受了它**
+  //   （React 只在 state 变化时重渲染，state 是空的时候假值会一直挂着）。
+  //   实测 Moka「出生日期 (年龄)」：值 4 秒后仍在、重渲染后仍在，但应用既没算出年龄、
+  //   也没有任何接受迹象。所以只读字段一律返回 ok:false + readonly-unverifiable，
+  //   **绝不报成功** —— 一个看起来填好、实际提交为空的字段，比明确失败危险得多。
+  async fillDate(id, ymd) {
+    const box = findField(id);
+    if (!box) return j({ ok: false, err: 'field-not-found', id });
+    const type = typeOf(box);
+    if (type !== 'date') return j({ ok: false, err: 'not-a-date-field', id, type });
+
+    // 接受 'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD'。
+    // 只有年份时按用户规则补 01，但**补了什么必须报出来**（assumed），
+    // 否则"我只有年份"这个数据缺口会被默认值掩盖。
+    const m = /^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$/.exec(String(ymd).trim());
+    if (!m) return j({ ok: false, err: 'bad-ymd', id, ymd });
+    const pad = (s) => String(+s).padStart(2, '0');
+    const assumed = [];
+    let mm = '01';
+    if (m[2]) mm = pad(m[2]);
+    else assumed.push('month');
+    const dd = m[3] ? pad(m[3]) : null;
+    if (!dd) assumed.push('day');
+    const wide = dd ? m[1] + '-' + mm + '-' + dd : m[1] + '-' + mm;
+    const parts = [m[1], mm].concat(dd ? [dd] : []);
+
+    const ins = [...box.querySelectorAll('input')]
+      .filter((i) => i.type !== 'file' && i.type !== 'checkbox' && i.type !== 'radio' && i.offsetHeight > 0);
+    if (!ins.length) return j({ ok: false, err: 'no-date-inputs', id });
+
+    const plan = ins.length === 1 ? [wide] : parts;
+    if (plan.length > ins.length) {
+      return j({ ok: false, err: 'input-count-mismatch', id, inputs: ins.length, parts: plan.length });
+    }
+    const targets = ins.slice(0, plan.length);
+    for (let i = 0; i < targets.length; i++) setNativeValue(targets[i], plan[i]);
+    await sleep(400);
+
+    const after = targets.map((i) => i.value);
+    const readonly = ins.filter((i) => i.readOnly).length;
+    const out = { id, wrote: plan, after, unfilledInputs: ins.length - plan.length };
+    if (assumed.length) out.assumed = assumed;
+    if (readonly) {
+      out.ok = false;
+      out.err = 'readonly-unverifiable';
+      out.readonlyInputs = readonly;
+      out.hint = '只读控件的程序化写入无法证明被应用接受，请在页面上人工确认或改用日历选择';
+      return j(out);
+    }
+    out.ok = after.every((v, i) => v === plan[i]);
+    if (!out.ok) out.err = 'not-stuck';
+    return j(out);
+  },
+
   // 在指定区块内加一行。按钮文本各站点高度雷同，所以不按文本选站点，
   // 而是"区块内定候选 → 取文本最短者 → 用区块计数 +1 验证效果"。
   async addRow(kind) {

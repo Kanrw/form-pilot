@@ -10,12 +10,14 @@
   类名一律保留 "-XXXXXXXX" 后缀形态：引擎的 typeMap 用 startsWith 前缀匹配，
   真实 hash 换成固定占位值，避免每次抓取都改这个文件。
 
-  刻意覆盖的四个点：
+  刻意覆盖的六个点：
     1. 复数 wrapper 与单数字段只差一个横线 —— 本文件的字段数会让
-       fieldSel 退回 `[class*=apply-field]` 时立刻失败（8 → 12）。
+       fieldSel 退回 `[class*=apply-field]` 时立刻失败（9 → 13）。
     2. 非重复区块（个人信息/求职意向）走 main>>，且"个人网站"重复 → main>>个人网站#2。
     3. 重复区块（教育背景）两行 → edu[0]>> / edu[1]>>。
-    4. 类型后缀：string_info→text、select_info→select、date_info→date。
+    4. 类型后缀：string_info→text、select_info→select、date_info→date、day_info→date。
+    5. 日期是多个文本框而不是下拉：`就读时间` 是 4 个可写 input（年/月/年/月 区间）。
+    6. 只读日期：`出生日期 (年龄)` 是 1 个 readonly input，程序化写入不可验证。
 -->
 <div class="apply-blocks-aaaaaaaa">
 
@@ -36,6 +38,13 @@
         <div class="title-hhhhhhhh">个人网站</div>
         <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" />
       </div>
+      <!-- 只读日期：实测 Moka「出生日期 (年龄)」就是这个形态。
+           程序化写入能粘在 DOM 上，但无法证明应用状态接受了它 →
+           fillDate 必须报 readonly-unverifiable，绝不报成功。 -->
+      <div class="apply-field-eeeeeeee day_info-qqqqqqqq apply-filed-padding-gggggggg">
+        <div class="title-hhhhhhhh">出生日期 (年龄)</div>
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" readonly placeholder="出生日期 (年龄)" />
+      </div>
     </div>
   </div>
 
@@ -49,7 +58,10 @@
       </div>
       <div class="apply-field-eeeeeeee date_info-nnnnnnnn apply-filed-padding-gggggggg">
         <div class="title-hhhhhhhh">就读时间</div>
-        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" readonly placeholder="就读时间" />
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="年" />
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="月" />
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="年" />
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="月" />
       </div>
     </div>
     <div class="apply-fields-dddddddd multi-mmmmmmmm">
@@ -59,7 +71,10 @@
       </div>
       <div class="apply-field-eeeeeeee date_info-nnnnnnnn apply-filed-padding-gggggggg">
         <div class="title-hhhhhhhh">就读时间</div>
-        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" readonly placeholder="就读时间" />
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="年" />
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="月" />
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="年" />
+        <input class="sd-Input-input-iiiiiiii sd-Input-common-input-jjjjjjjj" type="text" placeholder="月" />
       </div>
     </div>
     <button class="sd-Button-container-oooooooo"><span class="sd-Button-content-pppppppp">添加</span></button>

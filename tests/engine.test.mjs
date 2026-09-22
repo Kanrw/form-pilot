@@ -25,9 +25,9 @@ test('detect() 按 DOM 签名认站点', () => {
 
 test('scan() 字段数与 ID 单射', () => {
   const s = JSON.parse(moka().scan());
-  // ★ fixture 里 8 个字段 + 4 个 apply-fields-* wrapper。
-  //   fieldSel 一旦退回 `[class*=apply-field]`（少尾横线）这里立刻变成 12。
-  assert.equal(s.total, 8, 'fieldSel 必须排除 apply-fields-* wrapper');
+  // ★ fixture 里 9 个字段 + 4 个 apply-fields-* wrapper。
+  //   fieldSel 一旦退回 `[class*=apply-field]`（少尾横线）这里立刻变成 13。
+  assert.equal(s.total, 9, 'fieldSel 必须排除 apply-fields-* wrapper');
   // ★ ID 是 fillTexts(map) 的 key，重名即静默填错字段
   assert.equal(s.total, new Set(s.fields.map((f) => f.id)).size, 'ID 必须单射');
 });
@@ -88,4 +88,43 @@ test('findField() main 内重名落到不同 input', async () => {
   // ★ 这是我实现期补的消歧（plan 01 R2 原本只对降级形态消歧）的回归位
   assert.equal(a['main>>个人网站'].value, 'A 站');
   assert.equal(a['main>>个人网站#2'].value, 'B 站');
+});
+
+test('fillDate() 年月直填：区间只填起始，结束留空即"至今"', async () => {
+  const ja = moka();
+  const r = JSON.parse(await ja.fillDate('edu[0]>>就读时间', '2022-01'));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.wrote, ['2022', '01']);
+  assert.deepEqual(r.after, ['2022', '01'], '值必须真落进 input');
+  // ★ 4 个 input 是"年月年月"的区间，结束留空表示在读至今
+  assert.equal(r.unfilledInputs, 2, '区间字段只填起始，结束留空');
+});
+
+test('fillDate() 只有年份时补 01，且把假设报出来', async () => {
+  const ja = moka();
+  const r = JSON.parse(await ja.fillDate('edu[1]>>就读时间', '2018'));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.wrote, ['2018', '01'], '缺月份按用户规则补 01');
+  // ★ 静默默认会把"我只有年份"这个数据缺口掩盖掉，必须显式上报
+  assert.deepEqual(r.assumed, ['month', 'day']);
+});
+
+test('fillDate() 只读日期控件绝不报成功', async () => {
+  const ja = moka();
+  const r = JSON.parse(await ja.fillDate('main>>出生日期 (年龄)', '2000-02-01'));
+  // ★ 实测：只读 input 的程序化写入能把值粘在 DOM 上，但 React 只在 state 变化时重渲染，
+  //   state 为空时假值会一直挂着 —— 看着填好了，提交时是空的。所以这里必须失败。
+  assert.equal(r.ok, false, '不可验证就不能报成功');
+  assert.equal(r.err, 'readonly-unverifiable');
+  assert.equal(r.readonlyInputs, 1);
+});
+
+test('fillDate() 拒绝非日期字段与非法格式', async () => {
+  const ja = moka();
+  const a = JSON.parse(await ja.fillDate('main>>推荐码', '2000-01-01'));
+  assert.equal(a.err, 'not-a-date-field');
+  const b = JSON.parse(await ja.fillDate('edu[0]>>就读时间', '去年'));
+  assert.equal(b.err, 'bad-ymd');
+  const c = JSON.parse(await ja.fillDate('main>>不存在', '2022'));
+  assert.equal(c.err, 'field-not-found');
 });

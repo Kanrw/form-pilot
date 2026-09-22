@@ -66,10 +66,14 @@
 | R5 `probeEnv` / shadow DOM / iframe 穿透 | 一次真实表单上发现字段被漏扫 |
 | R9 `snapshot` / `setPlan` / `diff` | 一次真实联动导致计划外字段变更，且外层 LLM 从 scan/readAll 差异里看不出来 |
 | R3 `setChoice` / 菜单"确定"钩子 | 北森（或首个自定义 radio 站点）实际投入使用 |
-| R4 `fillDate` 试探 | Moka `day_info` 实测证明可直接输入（当前策略是留手动） |
 | R8 版本守卫 / `_busy` 运行锁 | 出现第二次注入或并发调用的真实事故 |
 
 判据一致：**没有真实站点、没有真实事故，就没有需求。**
+
+> **已解锁并实现**：R4 `fillDate`（2026-09-22）。触发条件由用户直接给出——
+> 原始条件是"Moka `day_info` 实测证明可直接输入"，用户的指示更宽："很多网页的表单，
+> 特别是时间表单，可以直接填写而不用下拉"；并给了缺省规则：**只有年份没有月份的，先用 `01` 填**。
+> 实现见 §六。它不再属于本表。
 
 ### 2.5 交付物聚焦
 
@@ -217,12 +221,21 @@ __ja.fillTexts(map)                            → {ok:number, failed:[{id,phase
                                                   retried:[id]}
 __ja.pickOption(id, text, {search=true})       → {ok,value} | {ok:false,err:'field-not-found'
                                                   |'menu-not-open'|'option-not-found'|'item-detached'}
+__ja.fillDate(id, 'YYYY-MM-DD')                → {ok,wrote,after,unfilledInputs} | {ok:false,err:
+                                                  'field-not-found'|'not-a-date-field'|'bad-ymd'
+                                                  |'no-date-inputs'|'input-count-mismatch'
+                                                  |'readonly-unverifiable'|'not-stuck'}
 ⏸ __ja.probeEnv()      ⏸ __ja.snapshot()      ⏸ __ja.setPlan(ids)
-⏸ __ja.setChoice(id,v) ⏸ __ja.fillDate(id,ymd) ⏸ __ja.diff()
+⏸ __ja.setChoice(id,v) ⏸ __ja.diff()
 ```
 
 - `type` 枚举：`text | textarea | file | select | date | cascade | choice | unknown`。
   `fillTexts` 只处理 `text`/`textarea`，其余跳过并在 `failed[].err` 里归类为 `not-text:<type>`。
+- **日期字段多为"年/月/日"若干文本框，不是下拉 —— 先试直填，别默认走 `pickOption`。**
+  实测 Moka：`就读时间` 是 4 个 input（年/月/年/月 的区间），`毕业时间（月）` 是 2 个（年/月），
+  都可直填。缺月份的按用户规则用 `01`（`2022` → `2022-01`）。
+  区间字段只填起始、结束留空即"至今"，未填个数在 `unfilledInputs` 里报出。
+  **只读日期控件（如 Moka `出生日期`）程序化写入无法验证 → 一律 `readonly-unverifiable` 转人工**，见 `fillDate` 注释。
 - `phase` 枚举：`locate | fill | verify`。
 - **文件上传不经引擎**：JS 拿不到 File 对象，走桥的 `upload` 动作，引擎不提供上传接口。
 - `scan`/`readAll` **没有分页参数**（§2.4 已删）。返回值超限再说。
