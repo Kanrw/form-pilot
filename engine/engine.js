@@ -95,6 +95,13 @@ function heuristicType(box) {
   if (/day_info|datepicker|date-picker|[_-]date([_-]|$)/i.test(cls)) return 'date';
   if (/cascade|location_info|[_-]area([_-]|$)/i.test(cls)) return 'cascade';
   if (/select|dropdown/i.test(cls)) return 'select';
+  // 子树判据（2026-09-22 飞书实测）：类型可能写在内部组件的类名上，不在字段盒子上。
+  // 命名失败：飞书的下拉 input 是 atsx-select-search__field，字段盒子 class 只有
+  // atsx-form-item 一个 token，且该 input 不是 readonly —— 上面两条旧判据全部落空，
+  // 8 个下拉字段会被判成 text，写值静默无效。这与 Moka bool_info 同类但根因不同：
+  // Moka 把类型写在盒子类名上（typeMap 能救），飞书写在组件上（只有子树判据能救）。
+  if (box.querySelector('[class*=date-picker],[class*=datepicker],[class*=DatePick]')) return 'date';
+  if (box.querySelector('[class*=select-search],[class*=Select],[class*=select-],[class*=-select],[class*=dropdown]')) return 'select';
   if (inp.readOnly) return 'select';   // 只读 = 需交互选择，不能直接写值
   return 'text';
 }
@@ -340,6 +347,7 @@ window.__ja = {
   detect() {
     if (document.querySelector('[class*=apply-field-]') && document.querySelector('[class*=sd-Input]')) return 'moka';
     if (document.querySelector('.form-item') && document.querySelector('[class*=phoenix]')) return 'beisen';
+    if (document.querySelector('[class~="atsx-form-item"]')) return 'feishu';
     return 'generic';
   },
 

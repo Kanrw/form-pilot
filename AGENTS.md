@@ -224,15 +224,34 @@
 就有：一次失败留下残留菜单 → 下一次点同一触发器把它关掉 → `openMenuFor` 永远看不到新菜单 →
 报 `menu-not-open`，而页面其实是好的。**这才是 `closeMenus()` 存在的理由**，别删。
 
+**站点探针**（2026-09-22 新增）：`node scripts/probe.mjs --session <名> [--as <sel>] [--text] [--limit N]`
+在真实页面上**只读** dump 结构，输出 `containers[]`（候选容器 + `nested` 套娃数）与
+`types[]`（类型 token 的子树特征），供人整理成注册项。**不推荐、不打分、不写回 adapters.js** ——
+理由是"猜一个"的代价是静默填错，那是本项目历史上最贵的一类失败。
+默认不输出任何页面文本（`--text` 才输出并打 stderr 警告）。
+回归在 `tests/probe.test.mjs`（3 例）；裁定过程与"为什么这么薄"见 `docs/plans/07-probe-tooling.md`。
+**它不是 R5 `probeEnv`**：开发期工具，不进注入到用户浏览器的 bundle，不参与填写。
+
 ## 五、适配器注册表
 
-文件：`engine/adapters.js` —— **已落盘**（IIFE 挂 `window.__jaAdapters`，幂等）。三个注册项：
+文件：`engine/adapters.js` —— **已落盘**（IIFE 挂 `window.__jaAdapters`，幂等）。四个注册项：
 
 | 适配器 | verified | source | fieldSel |
 | --- | --- | --- | --- |
 | `moka` | `2026-09-22` | CATL 校招申请页（只读探测） | `[class*=apply-field-]` |
 | `beisen` | `null` | `docs-only` | `.form-item` |
+| `feishu` | `2026-09-22` | 记忆科技校招申请页（只读探测，L3 未跑） | `[class~="atsx-form-item"]` |
 | `generic` | `null` | `builtin` | 空（走引擎默认：input 就近容器） |
+
+**feishu 与 moka 的根本差异（2026-09-22 实测）**：类型写在**内部组件**类名上
+（`atsx-select-search` / `atsx-date-picker`），字段盒子只有 `atsx-form-item` 一个 token，
+且下拉 input 非 readonly —— 启发式的旧两条判据全部落空，typeMap 无从写起（盒子上没有类型 token）。
+**引擎为此新增了子树判据**（`heuristicType` 在 cls/readonly 之前查组件类名），
+同轮顺带覆盖了 Moka `bool_info` 那类失败。选择器必须用 `~=`（完整词匹配）：
+裸 `[class*=atsx-form-item]` 实测命中 156 个节点，真盒子只有 28 个。
+字段名事实源是 `<label>`；`[class*=fieldName]` 的 textContent 会混入已填值（"意向城市东莞"）。
+「意向城市」「手机号码」是**只读展示**（值来自账号资料，盒内无 input），scan 报 `unknown` 属正确语义。
+`起止时间` 是 `atsx-date-picker-period-month` 月区间 —— `fillMonthRange` 的第二个站点。
 
 **moka 的选择器（实测）**：
 
@@ -456,6 +475,8 @@ Plan 01 R2 原本只对 `main` 前缀消歧，实测发现非重复区块之间�
 
 **执行上的差别**：映射表**完全由档案生成**，不为"解析已经填了"跳过任何字段；
 `readAll()` 只用于核对最终结果，**不用来判断"哪些还需要填"**。
+补充一条日期类的实测（同源）：解析痕迹里的日期同样不可信 —— 写入的 `01` 被应用解成
+"暂无选项"，`input.value` 看着有值、应用侧却是空的。所以连"它填好的日期"也要按同一套流程重来。
 
 **未验收**：`addRow` 之后的 ID 稳定性（加一行 → 出现 `edu[1]>>` 且 `edu[0]>>` 不变）。
 
