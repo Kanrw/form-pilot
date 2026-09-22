@@ -12,18 +12,24 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SCORED, SECTIONS, emptyValues, exportSchema, validateValues } from '../tools/profile.schema.mjs';
+import { SCORED, SECTIONS, emptyValues, exportSchema, validateOverrides, validateValues } from '../tools/profile.schema.mjs';
 import {
   assertInsidePrivate,
+  assertVersionName,
   buildMapping,
   expandRangeToDay,
   importMarkdown,
+  listVersions,
   readValues,
+  readVersion,
   resolvePaths,
+  resolveValues,
   serialize,
   summarize,
+  versionFile,
   writeText,
   writeValues,
+  writeVersion,
 } from '../tools/profile-io.mjs';
 import { createContext, route } from '../scripts/profile.mjs';
 import { loadProfileEditor, makeDom } from './helpers/jsdom-setup.mjs';
@@ -37,6 +43,17 @@ function tempRoot() {
 
 function ctxFor(root) {
   return createContext({ root, toolsDir: join(ROOT, 'tools') });
+}
+
+function seededRoot() {
+  const root = tempRoot();
+  const paths = resolvePaths(root);
+  const values = emptyValues();
+  values['basic.name'] = '示例';
+  values['basic.phone'] = '13800000000';
+  values['intent.targetRole'] = '基准岗位';
+  writeValues(paths, values);
+  return { root, paths };
 }
 
 // ── 映射表 ──────────────────────────────────────────────────────────────────
@@ -365,6 +382,118 @@ test('POST /api/import 在已有内容时先回 409，带 force 才覆盖', asyn
   assert.ok(existsSync(paths.backupPath));
 });
 
+// ── 投放版本 ────────────────────────────────────────────────────────────────
+
+test('投放版本：只存差异，通用事实永远来自基准', () => {
+  const { paths } = seededRoot();
+  writeVersion(paths, '半导体岗', { 'intent.targetRole': '模型研发工程师' });
+
+  const r = resolveValues(paths, '半导体岗');
+  assert.equal(r.values['intent.targetRole'], '模型研发工程师', '覆盖优先');
+  assert.equal(r.values['basic.phone'], '13800000000', '通用事实来自基准');
+  assert.equal(Object.keys(r.overrides).length, 1);
+  assert.deepEqual(listVersions(paths).map((v) => `${v.name}:${v.count}`), ['半导体岗:1']);
+});
+
+test('投放版本：白名单外的键不许进版本文件', () => {
+  const { paths } = seededRoot();
+
+  // ★ 放开覆盖 = "我改了手机号"其实只改了某个版本，下次投别的岗位才发现，而且是静默的。
+  assert.equal(validateOverrides({ 'basic.phone': '1' }).length, 1);
+  assert.equal(validateOverrides({ 'intent.targetRole': 'x' }).length, 0);
+  // 落盘时也要挡住：静默丢弃会让调用方以为存进去了
+  assert.throws(() => writeVersion(paths, '脏版本', { 'basic.phone': '999' }), /不允许覆盖/);
+  assert.ok(!existsSync(versionFile(paths, '脏版本')));
+});
+
+test('投放版本：版本名不合法直接拒绝', () => {
+  assert.throws(() => assertVersionName('../逃逸'), /不合法/);
+  assert.throws(() => assertVersionName('a/b'), /不合法/);
+  assert.throws(() => assertVersionName(''), /不能为空/);
+  assert.throws(() => assertVersionName(' 前后空格 '), /空白/);
+  assert.equal(assertVersionName('半导体岗-2027'), '半导体岗-2027');
+});
+
+test('PUT ?version= 只写版本文件，基准一个字节都不动', async () => {
+  const { root, paths } = seededRoot();
+  const ctx = ctxFor(root);
+  const baseBefore = readFileSync(paths.profilePath, 'utf8');
+  writeVersion(paths, '半导体岗', {});
+
+  const res = await route({
+    method: 'PUT',
+    url: '/api/profile?version=半导体岗',
+    headers: LOOPBACK,
+    body: JSON.stringify({ overrides: { 'intent.targetRole': '模型研发工程师' } }),
+  }, ctx);
+
+  assert.equal(res.status, 200);
+  assert.equal(JSON.parse(res.body).version, '半导体岗');
+  assert.equal(readFileSync(paths.profilePath, 'utf8'), baseBefore, '基准文件不该被动过');
+  assert.equal(readVersion(paths, '半导体岗').overrides['intent.targetRole'], '模型研发工程师');
+});
+
+test('PUT ?version= 带白名单外的键 → 400 且不落盘', async () => {
+  const { root, paths } = seededRoot();
+  const ctx = ctxFor(root);
+  writeVersion(paths, '半导体岗', {});
+
+  const res = await route({
+    method: 'PUT',
+    url: '/api/profile?version=半导体岗',
+    headers: LOOPBACK,
+    body: JSON.stringify({ overrides: { 'basic.phone': '19900000000' } }),
+  }, ctx);
+  assert.equal(res.status, 400);
+  assert.ok(JSON.parse(res.body).errors.length > 0);
+  assert.equal(Object.keys(readVersion(paths, '半导体岗').overrides).length, 0);
+});
+
+test('POST /api/versions：新建为空、复制逐字复制、重名 409', async () => {
+  const { root, paths } = seededRoot();
+  const ctx = ctxFor(root);
+  writeVersion(paths, '半导体岗', { 'intent.targetRole': '模型研发工程师', 'intent.targetCities': '<示例城市>' });
+
+  const created = await route({ method: 'POST', url: '/api/versions', headers: LOOPBACK, body: JSON.stringify({ name: '学术岗' }) }, ctx);
+  assert.equal(created.status, 200);
+  assert.equal(JSON.parse(created.body).overrides, 0, '从基准新建 = 空覆盖集');
+
+  const copied = await route({ method: 'POST', url: '/api/versions', headers: LOOPBACK, body: JSON.stringify({ name: '半导体岗-深圳', from: '半导体岗' }) }, ctx);
+  assert.equal(copied.status, 200);
+  assert.equal(JSON.parse(copied.body).overrides, 2, '复制 = 逐字带走覆盖集');
+  assert.deepEqual(readVersion(paths, '半导体岗-深圳').overrides, readVersion(paths, '半导体岗').overrides);
+
+  const dup = await route({ method: 'POST', url: '/api/versions', headers: LOOPBACK, body: JSON.stringify({ name: '学术岗' }) }, ctx);
+  assert.equal(dup.status, 409);
+});
+
+test('POST 的请求体要被读到（新建版本走的就是这条）', async () => {
+  const { root } = seededRoot();
+  const ctx = ctxFor(root);
+  // ★ 曾经只给 PUT 读体，POST 永远拿到空对象 → 界面「新建版本」直接报"版本名不能为空"
+  const res = await route({ method: 'POST', url: '/api/versions', headers: LOOPBACK, body: JSON.stringify({ name: '学术岗' }) }, ctx);
+  assert.equal(res.status, 200, JSON.stringify(JSON.parse(res.body)));
+  assert.equal(JSON.parse(res.body).name, '学术岗');
+});
+
+test('GET /api/profile?version= 返回合并后的值', async () => {
+  const { root, paths } = seededRoot();
+  const ctx = ctxFor(root);
+  writeVersion(paths, '半导体岗', { 'intent.targetRole': '模型研发工程师' });
+
+  const res = await route({ method: 'GET', url: '/api/profile?version=半导体岗', headers: LOOPBACK, body: '' }, ctx);
+  const body = JSON.parse(res.body);
+  assert.equal(res.status, 200);
+  assert.equal(body.version, '半导体岗');
+  assert.equal(body.values['intent.targetRole'], '模型研发工程师');
+  assert.equal(body.values['basic.phone'], '13800000000');
+  assert.equal(body.versions.length, 1);
+
+  const base = JSON.parse((await route({ method: 'GET', url: '/api/profile', headers: LOOPBACK, body: '' }, ctx)).body);
+  assert.equal(base.version, null, '不带 version 时是基准');
+  assert.equal(base.values['intent.targetRole'], '基准岗位');
+});
+
 // ── 界面渲染 ────────────────────────────────────────────────────────────────
 
 function editorFixture() {
@@ -372,7 +501,7 @@ function editorFixture() {
   const editor = loadProfileEditor(dom);
   const schema = JSON.parse(JSON.stringify(exportSchema()));
   const values = emptyValues();
-  const build = (section) => ({
+  const build = (section, extra) => Object.assign({
     schema,
     values,
     stats: summarize(values),
@@ -383,7 +512,7 @@ function editorFixture() {
     onEdit() {},
     onLiveCheck() {},
     onAction() {},
-  });
+  }, extra || {});
   const mount = (id) => dom.window.document.getElementById(id);
   return { dom, editor, schema, values, build, mount };
 }
@@ -404,6 +533,33 @@ test('登记表：行数、分类标记、never 围栏与 schema 一致', () => 
   const rowKeys = Array.from(node.querySelectorAll('.field-row')).map((row) => row.dataset.rowkey);
   assert.ok(rowKeys.includes('basic.phone'), '行键必须与服务端校验结果的键一致');
   assert.ok(rowKeys.includes('basic.idNumber'));
+});
+
+test('版本视图：只有白名单字段可编辑，通用事实只读', () => {
+  const f = editorFixture();
+  f.values['basic.phone'] = '13800000000';
+  const ctx = f.build('basic', { version: '半导体岗', overrides: {} });
+  const node = f.editor.renderSection(f.mount('main'), ctx);
+
+  // ★ 通用事实在版本视图里物理上改不动 —— 这条不做，"我改了手机号"就会变成
+  //   "只改了某个版本的手机号"，下次投别的岗位才发现。
+  const phone = node.querySelector('[data-rowkey="basic.phone"] input');
+  assert.equal(phone.readOnly, true);
+  assert.ok(node.querySelector('[data-rowkey="basic.phone"]').className.includes('is-locked'));
+  assert.equal(node.querySelector('[data-rowkey="basic.gender"] select').disabled, true, 'select 只能 disabled');
+});
+
+test('版本视图：被覆盖的行有标记与还原入口，白名单字段仍可编辑', () => {
+  const f = editorFixture();
+  f.values['intent.targetRole'] = '模型研发工程师';
+  const ctx = f.build('intent', { version: '半导体岗', overrides: { 'intent.targetRole': '模型研发工程师' } });
+  const node = f.editor.renderSection(f.mount('main'), ctx);
+
+  const hit = node.querySelector('[data-rowkey="intent.targetRole"]');
+  assert.ok(hit.querySelector('.badge-override'), '被覆盖的行要标出来：这个值只在这个版本生效');
+  assert.ok(hit.querySelector('.restore-btn'), '要能一条条还原');
+  assert.equal(hit.querySelector('input').readOnly, false, '白名单字段仍可编辑');
+  assert.ok(!node.querySelector('[data-rowkey="intent.targetCities"] .badge-override'), '没被覆盖的行不标');
 });
 
 test('日期区间用两个原生日期控件，不是自由文本', () => {

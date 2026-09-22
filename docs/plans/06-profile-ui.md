@@ -246,6 +246,10 @@ node --input-type=module -e "import('./tools/profile.schema.mjs').then(m=>consol
 | `GET` | `/api/profile` | `{ schema, values, unknownKeys, filePath, legacyMd, legacyMdExists, stats, errors, warnings, pathChecks }` |
 | `PUT` | `/api/profile` | body = `{ values, unknownKeys }`；有 error 时 400 **且不落盘**；成功则备份 + 写入，返回 `{ ok, savedAt, stats, errors, warnings, pathChecks }` |
 | `GET` | `/api/mapping` | `text/markdown`，与 `--render` 同一份（`never` 一项都不出现） |
+| `GET` | `/api/versions` | 版本列表（名字 + 覆盖项数）、版本目录、基准文件路径 |
+| `POST` | `/api/versions` | body = `{ name, from? }`；从基准新建 = 空覆盖集，「复制当前版本」= 逐字带走覆盖集；重名 409 |
+| `GET` | `/api/profile?version=<名>` | 基准 ⊕ 覆盖后的视图，附 `version` / `overrides` / `versions` |
+| `PUT` | `/api/profile?version=<名>` | body = `{ overrides }`；**通用事实根本不在这个请求里**，改不动；白名单外的键 → 400 |
 | `POST` | `/api/import` | 跑一次 md → json 迁移，只回计数不回值；已有内容且未带 `force` 时回 409 |
 
 **所有统计与校验一律由服务端算，界面只渲染。** 两侧各算一遍就会有两个数字，
@@ -504,6 +508,39 @@ ISO 回显仍然保留 —— 显示格式与存储格式不一致这件事本�
 使用者看完实现后判定向导"太累赘、没有用"，整块删除。删除范围与理由记在 §六「方向 B」。
 这是本项目纪律 §2.3 的一个正例：那一层的状态（冻结步骤、跳过集合、闸门展开）
 说不出挡住哪个具体失败；删掉之后登记表一行没动就完成了同样的工作。
+
+### 第六轮：投放版本（基础档案 + 差异）
+
+使用者要"投不同岗位时用不同口径"，并自己提了操作流：**左上角下拉里选"新建"或"复制"，然后在新版本里改**。
+认可这个流；两处收窄（都是为了让"乱"没有机会发生）：
+
+| 收窄 | 命名失败 |
+| --- | --- |
+| 白名单只放 **9 个固定字段**（求职意向 8 项 + 自我评价），**长文本答案不进白名单** | 它自带 `scope`，本就能表达"按岗位换说法"；整段放进版本会出现"基准里新加的通用答案某些版本看不到"这种静默的漏 |
+| 版本视图里**非白名单字段只读**（`readOnly` / `disabled` + 灰底） | 否则"我改了手机号"其实只改了某个版本，下次投别的岗位才发现 —— 这种错是静默的 |
+
+**白名单是代码强制的，三处一起挡**：`validateOverrides()` 报错、`writeVersion()` 直接抛错（不许静默丢弃）、
+界面把控件锁住。手改 json 也拦得住。
+
+**文件与命令**
+
+```
+private/profile.json              基准档案（唯一事实源，84 个字段位）
+private/profiles/<版本名>.json     只存差异：{ version, name, note, overrides: { 键: 值 } }
+```
+
+`--versions` 列出；`--new-version <名> [--from <版本>]` 新建；`--check / --render / --ui` 都可加
+`--version <名>`，映射表表头会写明「口径版本：X（覆盖 N 项，其余来自基准档案）」。
+
+**界面**：左上角下拉（基准档案 / 各版本·覆盖 N 项 / ＋新建版本 / 复制当前版本）；
+版本视图顶部一条提示"只有口径字段能改"；被覆盖的行标琥珀色「本版本已改」并给「还原为基准」；
+右栏多一块「本版本覆盖 N 项」列出是哪些。还原时用**服务端给的基准值**回填，
+不在前端重新实现一遍"基准 ⊕ 覆盖"的合并（避免两侧各算一遍）。
+
+**真实浏览器核对**（3 个临时版本，核对完已删）：切换后 `basic` 的 26 行全部只读、
+被覆盖的 2 行带徽章与还原按钮且仍可编辑、右栏「本版本覆盖 2 项」、无横向溢出。
+**顺手抓到一个真 bug**：`createHandler` 只给 PUT 读了请求体 → `POST /api/versions` 永远拿到空对象，
+界面上的「新建版本」会直接报"版本名不能为空"。已修并加用例盯住这条路径。
 
 ### 仍未覆盖
 

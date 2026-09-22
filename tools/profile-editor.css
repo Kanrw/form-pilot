@@ -332,6 +332,55 @@ button.link {
   white-space: nowrap;
 }
 
+.topbar select#version {
+  padding: 3px 6px;
+  border: 1px solid var(--rule-2);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  color: var(--ink-1);
+  font: 400 12px/1.5 var(--font-sans);
+  max-width: 260px;
+}
+
+.version-note {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.version-note strong {
+  font-weight: 500;
+  color: var(--ink-1);
+}
+
+.field-row.is-locked input,
+.field-row.is-locked textarea,
+.field-row.is-locked select {
+  background: oklch(0.955 0.003 92);
+  color: var(--ink-2);
+  cursor: default;
+}
+
+.badge-override {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: oklch(0.965 0.025 80);
+  color: var(--confirm);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.restore-btn {
+  margin-left: 8px;
+  font-size: 11px;
+}
+
 .field-row .field-msg {
   grid-column: 2 / -1;
   font-size: 11px;

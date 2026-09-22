@@ -11,8 +11,10 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { readdirSync } from 'node:fs';
 import {
   AUTOFILL,
+  OVERRIDABLE_KEYS,
   SCHEMA_VERSION,
   SECTIONS,
   cleanLabel,
@@ -22,6 +24,8 @@ import {
   isEmptyValue,
   isScored,
   manualList,
+  mergeValues,
+  validateOverrides,
   normalizeLabel,
   sectionByIndex,
   sectionOf,
@@ -188,6 +192,102 @@ export function checkPathWarnings(checks) {
   return checks
     .filter((c) => c.exists === false)
     .map((c) => ({ level: 'warn', key: c.key, label: c.label, message: '路径未找到' }));
+}
+
+// ── 投放版本 ────────────────────────────────────────────────────────────────
+//
+// 一份基础档案 + 每版本只存差异。版本能覆盖什么由 schema 的白名单卡死
+// （`OVERRIDABLE_KEYS`，当前 9 项：求职意向 8 项 + 自我评价）。
+//
+// 命名失败（为什么必须卡死）：放开覆盖，用户会以为在改"我的档案"，实际只改了某个版本，
+// 下次投别的岗位才发现手机号还是旧的 —— 这种错是静默的，所以要在代码层堵住，
+// 而不是靠使用者记得"这个值是在哪一层改的"。
+
+const VERSION_NAME_RE = /^(?!\.)[^/\\:*?"<>|\x00-\x1f]{1,24}$/;
+
+export function versionsDir(paths) {
+  return join(paths.privateDir, 'profiles');
+}
+
+export function versionFile(paths, name) {
+  return join(versionsDir(paths), `${name}.json`);
+}
+
+export function assertVersionName(name) {
+  const value = String(name || '').trim();
+  if (!value) throw new Error('版本名不能为空');
+  if (value !== String(name)) throw new Error('版本名首尾不能有空白');
+  if (!VERSION_NAME_RE.test(value)) throw new Error(`版本名不合法：${value}（不能含 / \\ : * ? " < > |，不能用点开头，最长 24 字）`);
+  return value;
+}
+
+// 按 schema 顺序排覆盖键，文件 diff 才稳定（同 orderValues 的理由）。
+export function orderOverrides(overrides) {
+  const ordered = {};
+  for (const key of OVERRIDABLE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(overrides, key)) ordered[key] = String(overrides[key]);
+  }
+  // 白名单外的键不落盘 —— 它们本来就不该存在（validateOverrides 会先报错）
+  return ordered;
+}
+
+export function listVersions(paths) {
+  const dir = versionsDir(paths);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.json') && !f.endsWith('.bak'))
+    .map((f) => f.slice(0, -5))
+    .sort()
+    .map((name) => {
+      const read = readVersion(paths, name);
+      return { name, count: Object.keys(read.overrides).length, overrides: Object.keys(read.overrides), updatedAt: read.mtime };
+    });
+}
+
+export function readVersion(paths, name) {
+  const value = assertVersionName(name);
+  const file = versionFile(paths, value);
+  if (!existsSync(file)) return { name: value, overrides: {}, exists: false, mtime: null };
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (e) {
+    throw new Error(`${file} 不是合法 JSON：${e.message}`);
+  }
+  const overrides = parsed.overrides && typeof parsed.overrides === 'object' ? parsed.overrides : {};
+  const mtime = statSync(file).mtimeMs;
+  return { name: value, overrides, exists: true, mtime, version: parsed.version };
+}
+
+export function writeVersion(paths, name, overrides, { backup = true } = {}) {
+  const value = assertVersionName(name);
+  // 硬边界：白名单外的键不许落盘。静默丢弃会让调用方以为存进去了。
+  const bad = validateOverrides(overrides);
+  if (bad.length) throw new Error(`版本里的这些键不允许覆盖：${bad.map((e) => e.key).join('、')}`);
+  const target = assertInsidePrivate(versionFile(paths, value), paths);
+  mkdirSync(dirname(target), { recursive: true });
+  let backedUp = false;
+  if (backup && existsSync(target)) {
+    copyFileSync(target, assertInsidePrivate(`${target}.bak`, paths));
+    backedUp = true;
+  }
+  const payload = { version: SCHEMA_VERSION, name: value, note: '', overrides: orderOverrides(overrides) };
+  writeFileSync(target, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  return { path: target, backedUp, count: Object.keys(payload.overrides).length };
+}
+
+// 基准 ⊕ 覆盖。version 为空 = 基准本身。
+export function resolveValues(paths, versionName) {
+  const base = readValues(paths);
+  if (!versionName) return { values: base.values, overrides: {}, base, version: null, versionExists: false };
+  const version = readVersion(paths, versionName);
+  return {
+    values: mergeValues(base.values, version.overrides),
+    overrides: version.overrides,
+    base,
+    version: version.name,
+    versionExists: version.exists,
+  };
 }
 
 // ── markdown 导入 ────────────────────────────────────────────────────────────
@@ -422,11 +522,12 @@ function cell(v) {
   return str(v).replace(/\|/g, '\\|').replace(/\n+/g, ' ') || '（空）';
 }
 
-export function renderMapping(values, { pathChecks = [], target = '' } = {}) {
+export function renderMapping(values, { pathChecks = [], target = '', version = null, overrides = 0 } = {}) {
   const out = [];
   out.push('# 个人档案 · 映射表');
   out.push('');
   out.push(`> 由 \`node scripts/profile.mjs --render\` 生成${target ? `，源文件 ${target}` : ''}。`);
+  out.push(version ? `> **口径版本：${version}**（覆盖 ${overrides} 项，其余来自基准档案）` : '> 口径版本：基准档案（未使用投放版本）');
   out.push('> 「永不自动填」的字段不在这里，也不会出现在任何一步给引擎的映射里。');
   out.push('');
 
@@ -485,8 +586,8 @@ export function renderMapping(values, { pathChecks = [], target = '' } = {}) {
   return out.join('\n');
 }
 
-export function buildMapping(values, paths) {
-  return renderMapping(values, { pathChecks: checkPaths(values), target: paths ? paths.profilePath : '' });
+export function buildMapping(values, paths, extra = {}) {
+  return renderMapping(values, { pathChecks: checkPaths(values), target: paths ? paths.profilePath : '', ...extra });
 }
 
 export function summarize(values) {

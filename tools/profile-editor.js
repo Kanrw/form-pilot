@@ -167,6 +167,19 @@
     return input;
   }
 
+  // 版本视图里把不该动的控件变只读。disabled 会连选中共复制都做不了，
+  // 所以文本类用 readOnly，select 与日期控件只能用 disabled（它们没有 readOnly）。
+  function lockControl(control) {
+    var nodes = control.matches && control.matches('input,textarea,select')
+      ? [control]
+      : Array.prototype.slice.call(control.querySelectorAll('input,textarea,select'));
+    nodes.forEach(function (node) {
+      if (node.tagName === 'SELECT' || node.type === 'date') node.disabled = true;
+      else node.readOnly = true;
+    });
+    return control;
+  }
+
   function pathBadge(id, ctx) {
     var check = null;
     (ctx.pathChecks || []).forEach(function (item) { if (item.key === id) check = item; });
@@ -213,6 +226,10 @@
     var id = rowId(section.key, field.key, index);
     var domId = 'f-' + id.replace(/[^A-Za-z0-9]+/g, '-');
     var value = readValue(ctx.values, section, field.key, index);
+    var overridden = !!(ctx.overrides && Object.prototype.hasOwnProperty.call(ctx.overrides, id));
+    // 版本视图里只有白名单字段能改。通用事实（手机号、教育、论文…）在版本里物理上改不动 ——
+    // 否则"我改了手机号"其实只改了某个版本，下次投别的岗位才发现。
+    var locked = !!ctx.version && !field.overridable;
     var message = messageFor(id, field, ctx);
     // 文本框的 hint 已经当占位符显示过了，别再在下面重复一遍（日期控件与下拉没有占位符，则不在此列）。
     if (message && message.kind === 'hint' && field.hint && field.type !== 'select') message = null;
@@ -222,19 +239,35 @@
       message = { kind: 'hint', text: '存的是 ' + value };
     }
 
-    var row = el('div', {
-      class: 'field-row' + (message && message.kind === 'error' ? ' is-error' : ''),
-      dataset: { rowkey: id },
-    });
-    row.appendChild(el('label', { class: 'field-label', for: domId, text: field.label }));
+    var rowClass = 'field-row';
+    if (message && message.kind === 'error') rowClass += ' is-error';
+    if (locked) rowClass += ' is-locked';
+    var row = el('div', { class: rowClass, dataset: { rowkey: id } });
 
-    row.appendChild(controlFor(field, domId, value, id, section, index, ctx));
+    var label = el('label', { class: 'field-label', for: domId, text: field.label });
+    if (overridden) {
+      label.appendChild(el('span', { class: 'badge-override', text: '本版本已改', title: '这个值只在这个版本生效' }));
+    }
+    if (locked) label.setAttribute('title', '通用事实：不在版本白名单里，要改就切回基准档案');
+    row.appendChild(label);
+
+    var control = controlFor(field, domId, value, id, section, index, ctx);
+    if (locked) lockControl(control);
+    row.appendChild(control);
     row.appendChild(markCell(field, id, ctx));
 
     var msgClass = 'field-msg';
     if (message && message.kind === 'error') msgClass += ' msg-error';
     if (message && message.kind === 'warn') msgClass += ' msg-warn';
-    row.appendChild(el('p', { class: msgClass, text: message ? message.text : '' }));
+    var msg = el('p', { class: msgClass });
+    if (message) msg.appendChild(document.createTextNode(message.text));
+    if (overridden) {
+      msg.appendChild(el('button', {
+        type: 'button', class: 'link restore-btn', text: '还原为基准',
+        on: { click: function () { ctx.onAction({ type: 'restore-override', id: id }); } },
+      }));
+    }
+    row.appendChild(msg);
     return row;
   }
 
@@ -333,6 +366,17 @@
     return node;
   }
 
+  // 覆盖键 → 人能读的标签（`intent.targetRole` → 「求职意向 · 意向岗位」）
+  function overrideLabel(schema, key) {
+    var found = key;
+    schema.sections.forEach(function (section) {
+      section.fields.forEach(function (field) {
+        if (section.key + '.' + field.key === key) found = section.label + ' · ' + field.label;
+      });
+    });
+    return found;
+  }
+
   var CATEGORY_HELP = {
     auto: '值不随公司变，映射确认后由引擎批量填',
     confirm: '值随公司/岗位的口径变，必须每项单独确认',
@@ -378,6 +422,16 @@
     });
     if (manual.length > 10) node.appendChild(el('p', { class: 'manual-item', text: '… 还有 ' + (manual.length - 10) + ' 项' }));
 
+    if (ctx.version) {
+      var keys = Object.keys(ctx.overrides);
+      node.appendChild(el('div', { class: 'divider' }));
+      node.appendChild(el('h2', { text: '本版本覆盖 ' + keys.length + ' 项' }));
+      if (!keys.length) node.appendChild(el('p', { class: 'manual-item', text: '（与基准一致）' }));
+      keys.forEach(function (key) {
+        node.appendChild(el('p', { class: 'manual-item', text: overrideLabel(ctx.schema, key) }));
+      });
+    }
+
     node.appendChild(el('div', { class: 'stack' }, [
       el('button', {
         type: 'button', text: '映射表',
@@ -400,12 +454,19 @@
       saveState: document.getElementById('save-state'),
       save: document.getElementById('save'),
       banner: document.getElementById('banner'),
+      version: document.getElementById('version'),
+      versionNote: document.getElementById('version-note'),
     };
 
     var state = {
       section: 'basic',
       schema: null,
       values: {},
+      baseValues: {},
+      version: '',
+      versions: [],
+      overrides: {},
+      overridableKeys: {},
       unknownKeys: {},
       stats: null,
       errors: {},
@@ -429,6 +490,8 @@
         warnings: state.warnings,
         pathChecks: state.pathChecks,
         section: state.section,
+        version: state.version,
+        overrides: state.overrides,
         onEdit: onEdit,
         onLiveCheck: onLiveCheck,
         onAction: onAction,
@@ -442,11 +505,38 @@
       state.pathChecks = body.pathChecks || state.pathChecks;
     }
 
+    function renderVersionPicker() {
+      var node = els.version;
+      clear(node);
+      node.appendChild(el('option', { value: '', text: '基准档案' }));
+      state.versions.forEach(function (v) {
+        node.appendChild(el('option', { value: v.name, text: v.name + ' · 覆盖 ' + v.overrides + ' 项' }));
+      });
+      node.appendChild(el('option', { value: '__new__', text: '＋ 新建版本（从基准开始）…' }));
+      node.appendChild(el('option', { value: '__copy__', text: '复制当前版本…' }));
+      node.value = state.version;
+    }
+
+    function renderVersionNote() {
+      var node = els.versionNote;
+      clear(node);
+      if (!state.version) {
+        node.hidden = true;
+        return;
+      }
+      node.hidden = false;
+      var count = Object.keys(state.overrides).length;
+      node.appendChild(el('strong', { text: '版本「' + state.version + '」' }));
+      node.appendChild(el('span', { text: '：只有口径字段（求职意向、自我评价）能改，覆盖了 ' + count + ' 项；通用事实切回基准档案改。' }));
+    }
+
     function render() {
       els.file.textContent = state.filePath || '';
       els.file.title = state.filePath || '';
       els.completeness.textContent = state.stats ? state.stats.completeness : '—';
 
+      renderVersionPicker();
+      renderVersionNote();
       renderRail(els.rail, ctx());
       renderSection(els.main, ctx());
       renderAside(els.aside, ctx());
@@ -467,7 +557,11 @@
     }
 
     function onEdit(id, section, fieldKey, index, value) {
+      // 双保险：界面上已经锁住了，这里再挡一次 —— 覆盖集一旦混进通用事实，
+      // 就变成"改了某个版本的手机号"这种静默错误。
+      if (state.version && !state.overridableKeys[id]) return;
       writeValue(state.values, section, fieldKey, index, value);
+      if (state.version) state.overrides[id] = value;
       state.dirty = true;
       state.changed[id] = true;
       if (state.errors[id]) { delete state.errors[id]; refreshRow(id); }
@@ -515,30 +609,114 @@
         render();
         return;
       }
+      if (action.type === 'restore-override') {
+        delete state.overrides[action.id];
+        // 用服务端给的基准值回填，不在前端重新实现"基准 ⊕ 覆盖"的合并
+        state.values[action.id] = state.baseValues[action.id] === undefined ? '' : state.baseValues[action.id];
+        state.dirty = true;
+        state.changed[action.id] = true;
+        render();
+        setSaveState('已还原（未保存）');
+        return;
+      }
       if (action.type === 'save') { save(); return; }
       if (action.type === 'show-mapping') { showMapping(); return; }
     }
 
+    function applyProfile(body) {
+      state.schema = body.schema;
+      state.overridableKeys = {};
+      body.schema.sections.forEach(function (section) {
+        if (section.repeatable) return;
+        section.fields.forEach(function (field) {
+          if (field.overridable) state.overridableKeys[section.key + '.' + field.key] = true;
+        });
+      });
+      state.values = body.values;
+      state.version = body.version || '';
+      state.overrides = body.overrides || {};
+      state.versions = body.versions || [];
+      state.unknownKeys = body.unknownKeys || {};
+      state.filePath = body.filePath;
+      state.exists = body.exists;
+      state.legacyMdExists = body.legacyMdExists;
+      applyServerResult(body);
+      render();
+    }
+
     function load() {
+      // 先拿基准（还原时要回填它的值），再按当前版本取解析后的视图。
       return fetch('/api/profile')
         .then(function (response) { return response.json().then(function (body) { return { status: response.status, body: body }; }); })
         .then(function (result) {
-          if (result.status !== 200) { setSaveState('读取失败：' + (result.body.error || result.status)); return; }
-          var body = result.body;
-          state.schema = body.schema;
-          state.values = body.values;
-          state.unknownKeys = body.unknownKeys || {};
-          state.filePath = body.filePath;
-          state.exists = body.exists;
-          state.legacyMdExists = body.legacyMdExists;
-          applyServerResult(body);
-          render();
+          if (result.status !== 200) { setSaveState('读取失败：' + (result.body.error || result.status)); return null; }
+          state.baseValues = result.body.values;
+          state.defaultVersion = result.body.version || '';
+          applyProfile(result.body);
           // 服务进程的 schema 是启动时加载的：改完 schema 不重启，界面会继续用旧规则校验，
           // 报出来的错对不上文件内容，看起来像代码 bug。
-          if (body.schemaStale) showStaleBanner();
-          else if (!body.exists && body.legacyMdExists) showImportBanner();
+          if (result.body.schemaStale) showStaleBanner();
+          else if (!result.body.exists && result.body.legacyMdExists) showImportBanner();
+          return state.version ? loadVersion(state.version) : null;
         })
         .catch(function (error) { setSaveState('读取失败：' + error.message); });
+    }
+
+    function loadVersion(name) {
+      return fetch('/api/profile?version=' + encodeURIComponent(name))
+        .then(function (response) { return response.json().then(function (body) { return { status: response.status, body: body }; }); })
+        .then(function (result) {
+          if (result.status !== 200) {
+            setSaveState('切换失败：' + (result.body.message || result.body.error || result.status));
+            return null;
+          }
+          applyProfile(result.body);
+          state.dirty = false;
+          state.changed = {};
+          setSaveState('已加载版本「' + name + '」');
+          return null;
+        });
+    }
+
+    function switchVersion(name) {
+      if (state.dirty && !window.confirm('当前有未保存的改动，切换版本会丢掉。继续吗？')) {
+        renderVersionPicker();
+        return null;
+      }
+      if (!name) {
+        state.version = '';
+        state.overrides = {};
+        state.dirty = false;
+        state.changed = {};
+        return load();
+      }
+      state.dirty = false;
+      state.changed = {};
+      return loadVersion(name);
+    }
+
+    function createVersion(kind) {
+      var suggestion = kind === 'copy' && state.version ? state.version + '-2' : '新版本';
+      var name = window.prompt(kind === 'copy' ? '复制当前版本，新版本叫什么？' : '新建一个版本（从基准开始），叫什么？', suggestion);
+      if (!name) { renderVersionPicker(); return null; }
+      return fetch('/api/versions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), from: kind === 'copy' ? state.version : '' }),
+      })
+        .then(function (response) { return response.json().then(function (body) { return { status: response.status, body: body }; }); })
+        .then(function (result) {
+          if (result.status !== 200) {
+            setSaveState('新建失败：' + (result.body.message || result.body.error));
+            renderVersionPicker();
+            return null;
+          }
+          state.version = result.body.name;
+          state.overrides = {};
+          setSaveState('已新建版本「' + result.body.name + '」');
+          return loadVersion(result.body.name);
+        })
+        .catch(function (error) { setSaveState('新建失败：' + error.message); return null; });
     }
 
     function showStaleBanner() {
@@ -555,10 +733,14 @@
     function save() {
       if (!state.schema) return;
       setSaveState('保存中…');
-      fetch('/api/profile', {
+      var url = state.version ? '/api/profile?version=' + encodeURIComponent(state.version) : '/api/profile';
+      var payload = state.version
+        ? { overrides: state.overrides }
+        : { values: state.values, unknownKeys: state.unknownKeys };
+      fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: state.values, unknownKeys: state.unknownKeys }),
+        body: JSON.stringify(payload),
       })
         .then(function (response) { return response.json().then(function (body) { return { status: response.status, body: body }; }); })
         .then(function (result) {
@@ -644,6 +826,11 @@
     }
 
     els.save.addEventListener('click', save);
+    els.version.addEventListener('change', function () {
+      var value = els.version.value;
+      if (value === '__new__' || value === '__copy__') createVersion(value === '__copy__' ? 'copy' : 'new');
+      else switchVersion(value);
+    });
     document.addEventListener('keydown', function (event) {
       if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); save(); }
     });

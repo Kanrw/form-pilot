@@ -19,18 +19,24 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { exportSchema, validateValues } from '../tools/profile.schema.mjs';
+import { exportSchema, validateOverrides, validateValues } from '../tools/profile.schema.mjs';
 import {
+  assertVersionName,
   buildMapping,
   checkPathWarnings,
   checkPaths,
   counts,
   importMarkdown,
+  listVersions,
   readValues,
+  readVersion,
   resolvePaths,
+  resolveValues,
   summarize,
+  versionsDir,
   writeText,
   writeValues,
+  writeVersion,
 } from '../tools/profile-io.mjs';
 
 const MAX_BODY = 1 << 20;
@@ -104,9 +110,30 @@ export async function route(req, ctx) {
     return serve(name);
   }
 
+  if (req.method === 'GET' && pathname === '/api/versions') {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    return jsonResponse(200, {
+      dir: versionsDir(paths).replace(paths.root, '.'),
+      base: paths.profilePath.replace(paths.root, '.'),
+      versions: listVersions(paths).map((v) => ({ name: v.name, overrides: v.count })),
+    });
+  }
+
   if (req.method === 'GET' && pathname === '/api/profile') {
-    const { values, exists, unknownKeys } = readValues(paths);
+    const query = new URL(req.url, `http://${req.headers.host}`).searchParams;
+    const version = query.get('version') || '';
+    if (version) {
+      try {
+        assertVersionName(version);
+      } catch (e) {
+        return jsonResponse(400, { error: 'bad-version-name', message: e.message });
+      }
+    }
+    const resolved = resolveValues(paths, version);
+    const { values } = resolved;
+    const { exists, unknownKeys } = resolved.base;
     const { errors, warnings } = validateValues(values);
+    errors.push(...validateOverrides(resolved.overrides));
     const pathChecks = checkPaths(values);
     warnings.push(...checkPathWarnings(pathChecks));
     return jsonResponse(200, {
@@ -115,6 +142,11 @@ export async function route(req, ctx) {
       legacyMd: paths.legacyMd,
       legacyMdExists: existsSync(paths.legacyMd),
       exists,
+      version: resolved.version,
+      versionExists: resolved.versionExists,
+      overrides: resolved.overrides,
+      versions: listVersions(paths).map((v) => ({ name: v.name, overrides: v.count })),
+      dir: versionsDir(paths).replace(paths.root, '.'),
       schema: exportSchema(),
       values,
       unknownKeys,
@@ -123,6 +155,28 @@ export async function route(req, ctx) {
       warnings,
       pathChecks,
     });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/versions') {
+    let payload;
+    try {
+      payload = JSON.parse(req.body || '{}');
+    } catch {
+      return jsonResponse(400, { ok: false, error: 'bad-json' });
+    }
+    let name;
+    try {
+      name = assertVersionName(payload.name);
+    } catch (e) {
+      return jsonResponse(400, { ok: false, error: 'bad-version-name', message: e.message });
+    }
+    if (listVersions(paths).some((v) => v.name === name)) {
+      return jsonResponse(409, { ok: false, error: 'version-exists', name });
+    }
+    // 「复制当前版本」= 逐字复制它的覆盖集；从基准新建 = 空覆盖集。
+    const source = payload.from ? readVersion(paths, String(payload.from)) : { overrides: {} };
+    const written = writeVersion(paths, name, source.overrides, { backup: false });
+    return jsonResponse(200, { ok: true, name, from: payload.from || null, file: written.path, overrides: written.count });
   }
 
   if (req.method === 'GET' && pathname === '/api/mapping') {
@@ -137,6 +191,45 @@ export async function route(req, ctx) {
     } catch {
       return jsonResponse(400, { ok: false, error: 'bad-json' });
     }
+    const version = new URL(req.url, `http://${req.headers.host}`).searchParams.get('version') || '';
+
+    // 版本视图保存的是覆盖集：通用事实根本不在这个请求里，改不动。
+    if (version) {
+      let name;
+      try {
+        name = assertVersionName(version);
+      } catch (e) {
+        return jsonResponse(400, { ok: false, error: 'bad-version-name', message: e.message });
+      }
+      const overrides = payload.overrides;
+      if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
+        return jsonResponse(400, { ok: false, error: 'missing-overrides' });
+      }
+      const overrideErrors = validateOverrides(overrides);
+      if (overrideErrors.length) return jsonResponse(400, { ok: false, savedAt: null, errors: overrideErrors, warnings: [] });
+
+      const resolved = resolveValues(paths, name);
+      const { errors, warnings } = validateValues({ ...resolved.values, ...overrides });
+      if (errors.length) return jsonResponse(400, { ok: false, savedAt: null, errors, warnings });
+
+      const written = writeVersion(paths, name, overrides);
+      const merged = resolveValues(paths, name);
+      const pathChecks = checkPaths(merged.values);
+      warnings.push(...checkPathWarnings(pathChecks));
+      return jsonResponse(200, {
+        ok: true,
+        savedAt: new Date().toISOString(),
+        filePath: written.path,
+        backup: written.backedUp ? `${written.path}.bak` : null,
+        version: name,
+        overrides: orderOverridesForResponse(overrides),
+        stats: summarize(merged.values),
+        errors: [],
+        warnings,
+        pathChecks,
+      });
+    }
+
     const values = payload.values;
     if (!values || typeof values !== 'object' || Array.isArray(values)) {
       return jsonResponse(400, { ok: false, error: 'missing-values' });
@@ -197,6 +290,12 @@ export async function route(req, ctx) {
   return jsonResponse(404, { error: 'not-found' });
 }
 
+function orderOverridesForResponse(overrides) {
+  const ordered = {};
+  Object.keys(overrides).sort().forEach((k) => { ordered[k] = overrides[k]; });
+  return ordered;
+}
+
 function readBody(req) {
   return new Promise((resolveBody, reject) => {
     let size = 0;
@@ -219,7 +318,9 @@ export function createHandler(ctx) {
   return async (req, res) => {
     let result;
     try {
-      const body = req.method === 'PUT' ? await readBody(req) : '';
+      // PUT 与 POST 都带体。只给 PUT 读体，会让 POST /api/versions 永远拿到空对象，
+      // 表现为"版本名不能为空" —— 界面上的「新建版本」正好走这条路径。
+      const body = req.method === 'PUT' || req.method === 'POST' ? await readBody(req) : '';
       result = await route({ method: req.method, url: req.url, headers: req.headers, body }, ctx);
     } catch (e) {
       result = jsonResponse(500, { error: 'internal', message: e.message });
@@ -255,6 +356,9 @@ const USAGE = `用法：
   node scripts/profile.mjs --check           校验，有 error 时退出码 1
   node scripts/profile.mjs --render [--out]  打出映射表；给 --out 则写文件，不打印内容
   node scripts/profile.mjs --ui              起本地界面（http://127.0.0.1:8787）
+  node scripts/profile.mjs --versions        列出所有投放版本
+  node scripts/profile.mjs --new-version <名> [--from <版本>]   新建版本（默认从基准开始）
+投放版本：--check / --render / --ui 都可加 --version <名>，按该版本的口径工作
 参数：--root <dir>  --port <n>  --force`;
 
 function out(obj) {
@@ -314,28 +418,74 @@ function run(argv) {
     return 0;
   }
 
-  if (flags.check) {
-    let read;
+  if (flags.versions) {
+    const list = listVersions(paths);
+    out({
+      ok: true,
+      action: 'versions',
+      dir: versionsDir(paths).replace(paths.root, '.'),
+      count: list.length,
+      versions: list.map((v) => ({ name: v.name, overrides: v.count })),
+    });
+    return 0;
+  }
+
+  if (flags['new-version']) {
+    let name;
     try {
-      read = readValues(paths);
+      name = assertVersionName(flags['new-version']);
+    } catch (e) {
+      out({ ok: false, error: 'bad-version-name', message: e.message });
+      return 1;
+    }
+    if (listVersions(paths).some((v) => v.name === name)) {
+      out({ ok: false, error: 'version-exists', name });
+      return 1;
+    }
+    const from = flags.from && flags.from !== true ? String(flags.from) : '';
+    const source = from ? readVersion(paths, from) : { overrides: {} };
+    const written = writeVersion(paths, name, source.overrides, { backup: false });
+    out({ ok: true, action: 'new-version', name, from: from || '基准', file: written.path, overrides: written.count });
+    return 0;
+  }
+
+  if (flags.check) {
+    const versionName = flags.version && flags.version !== true ? String(flags.version) : '';
+    let resolved;
+    try {
+      resolved = resolveValues(paths, versionName);
     } catch (e) {
       out({ ok: false, error: 'unreadable', file: paths.profilePath, message: e.message });
       return 1;
     }
-    const { values, exists, unknownKeys } = read;
+    const { values } = resolved;
+    const { exists, unknownKeys } = resolved.base;
     const { errors, warnings } = validateValues(values);
+    errors.push(...validateOverrides(resolved.overrides));
     const pathChecks = checkPaths(values);
     warnings.push(...checkPathWarnings(pathChecks));
     const notes = [];
     if (!exists && existsSync(paths.legacyMd)) notes.push(`还没有 ${paths.profilePath}，但 ${paths.legacyMd} 存在 —— 先跑 --import`);
     if (Object.keys(unknownKeys).length) notes.push(`有 ${Object.keys(unknownKeys).length} 个键当前 schema 不认识，会原样保留但不会被校验`);
-    out({ ok: errors.length === 0, file: paths.profilePath, exists, summary: summarize(values), errors, warnings, notes });
+    if (versionName && !resolved.versionExists) notes.push(`版本「${versionName}」还不存在，这次按基准校验`);
+    out({
+      ok: errors.length === 0,
+      file: paths.profilePath,
+      version: resolved.version,
+      overrides: Object.keys(resolved.overrides).length,
+      exists,
+      summary: summarize(values),
+      errors,
+      warnings,
+      notes,
+    });
     return errors.length ? 1 : 0;
   }
 
   if (flags.render) {
-    const { values } = readValues(paths);
-    const mapping = buildMapping(values, paths);
+    const versionName = flags.version && flags.version !== true ? String(flags.version) : '';
+    const resolved = resolveValues(paths, versionName);
+    const mapping = buildMapping(resolved.values, paths, { version: resolved.version, overrides: Object.keys(resolved.overrides).length });
     const dest = flags.out && flags.out !== true ? String(flags.out) : '';
     if (dest) {
       const target = writeText(paths, dest, mapping);
@@ -349,6 +499,7 @@ function run(argv) {
   if (flags.ui) {
     const port = Number(flags.port && flags.port !== true ? flags.port : 8787);
     const ctx = createContext({ root: paths.root, toolsDir });
+    ctx.defaultVersion = flags.version && flags.version !== true ? String(flags.version) : '';
     const server = createServer(createHandler(ctx));
     server.on('error', (e) => {
       out({ ok: false, error: e.code === 'EADDRINUSE' ? 'port-in-use' : 'listen-failed', message: e.message, port });

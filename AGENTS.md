@@ -20,6 +20,9 @@
   本机 `~/Documents/FindAJob/resume/data/` 是**被提交**的资产目录，同名反义。
 - 档案是两个文件：字段定义（含三类分类）在 `tools/profile.schema.mjs`，值在 `private/profile.json`；
   人读镜像与 `--import` 的输入格式是 `docs/profile-template.md`。界面：`node scripts/profile.mjs --ui`。
+- 档案还允许有"投放版本"：`private/profiles/<名>.json` 只存差异（`{ overrides }`），基准是 `private/profile.json`。
+  **版本能覆盖什么由 `tools/profile.schema.mjs` 的 `OVERRIDABLE_KEYS` 白名单卡死**（当前 9 项：求职意向 8 项 + 自我评价），
+  `validateOverrides()` / `writeVersion()` / 界面锁定三处一起挡 —— 放开会让"改手机号"变成"只改了某个版本"，而这是静默的。
 - 分类只写 schema，不写进数据文件。`never` 类（证件号码等）在界面上进朱砂虚线围栏，
   且**不进任何映射**：`--render` 与 `GET /api/mapping` 的输出里一项都不许出现，有测试盯着这条。
 - 写入路径由代码守着：`scripts/profile.mjs` 与服务端的任何落盘都必须落在 `<root>/private/` 内，越界直接拒绝。
@@ -111,7 +114,7 @@
 | `03-project-packaging.md` | 项目结构、打包与文档 | 152 |
 | `04-reality-check-2026-09-22.md` | 实况审查：AGENTS.md/01/02/03 对磁盘、git、桥接实测的逐条核对 | — |
 | `05-execution-architecture.md` | 执行路线与架构（终版，取代 00 的路线图与 03 的实施清单） | 279 |
-| `06-profile-ui.md` | 个人档案界面：路线 B（本地 Node 服务）+ 方向 A（向导已撤，见 §六）；**已实施**，偏差与验证证据见 §十三 | 468 |
+| `06-profile-ui.md` | 个人档案界面：路线 B（本地 Node 服务）+ 方向 A（向导已撤，见 §六）+ 投放版本（§十三 第六轮）；**已实施** | 545 |
 
 ### 核心决定（用户决策，2026-09-22）
 

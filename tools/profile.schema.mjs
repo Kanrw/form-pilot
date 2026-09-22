@@ -46,6 +46,9 @@ function f(key, label, type, autofill, extra = {}) {
     // 同一个字段在别的写法里叫什么。迁移时会遇到用户自己那份档案的写法，
     // 名字对不上就等于丢字段（命名失败：导入报 ok，值却没了）。
     aliases: extra.aliases || null,
+    // 是否允许被"投放版本"覆盖。默认不允许 —— 版本能覆盖什么必须是显式声明的，
+    // 否则"改手机号"会变成"改了某个版本的手机号"（静默，下次投别的岗位才发现）。
+    overridable: !!extra.overridable,
   };
 }
 
@@ -213,14 +216,14 @@ export const SECTIONS = [
     short: '求职意向',
     repeatable: false,
     fields: [
-      f('graduateStatus', '应届 / 往届', 'select', 'confirm', { options: ['应届', '往届'] }),
-      f('targetRole', '意向岗位', 'text', 'confirm'),
-      f('targetDirections', '目标方向', 'text', 'confirm'),
-      f('targetCities', '意向城市', 'text', 'confirm'),
-      f('targetIndustries', '意向行业', 'text', 'confirm'),
-      f('expectedSalary', '期望薪资', 'text', 'confirm', { hint: '无来源就留空，不猜' }),
-      f('availableFrom', '可到岗时间', 'text', 'confirm'),
-      f('transferPreference', '调剂意愿', 'text', 'confirm', { hint: '是否接受地点 / 岗位调剂' }),
+      f('graduateStatus', '应届 / 往届', 'select', 'confirm', { options: ['应届', '往届'], overridable: true }),
+      f('targetRole', '意向岗位', 'text', 'confirm', { overridable: true }),
+      f('targetDirections', '目标方向', 'text', 'confirm', { overridable: true }),
+      f('targetCities', '意向城市', 'text', 'confirm', { overridable: true }),
+      f('targetIndustries', '意向行业', 'text', 'confirm', { overridable: true }),
+      f('expectedSalary', '期望薪资', 'text', 'confirm', { hint: '无来源就留空，不猜', overridable: true }),
+      f('availableFrom', '可到岗时间', 'text', 'confirm', { overridable: true }),
+      f('transferPreference', '调剂意愿', 'text', 'confirm', { hint: '是否接受地点 / 岗位调剂', overridable: true }),
     ],
   },
   {
@@ -229,7 +232,7 @@ export const SECTIONS = [
     short: '自我评价',
     repeatable: false,
     fields: [
-      f('text', '全文', 'textarea', 'confirm', { hint: '逐字照自己的原稿，不要在这里改写' }),
+      f('text', '全文', 'textarea', 'confirm', { hint: '逐字照自己的原稿，不要在这里改写', overridable: true }),
     ],
   },
   {
@@ -239,7 +242,9 @@ export const SECTIONS = [
     repeatable: true,
     importStyle: 'qa',
     fields: [
-      f('scope', '适用公司 / 岗位', 'text', 'note', { hint: '留空 = 通用' }),
+      // 刻意不给 overridable：这一区段自带 scope（适用公司 / 岗位），
+      // 按岗位分口径就在这里多写一条。放进版本会出现"基准里新加的通用答案某些版本看不到"的静默漏。
+      f('scope', '适用公司 / 岗位', 'text', 'note', { hint: '留空 = 通用。按岗位换说法就写在这里，不用建版本' }),
       f('question', '题目', 'text', 'note'),
       f('answer', '答案', 'textarea', 'confirm'),
     ],
@@ -324,6 +329,14 @@ export function emptyValues() {
   return values;
 }
 
+// 「投放版本」被允许覆盖的字段白名单。这是硬边界：
+// 白名单外的键出现在版本文件里，--check 与 PUT 都直接报错。
+export const OVERRIDABLE_KEYS = new Set(FLAT.filter((x) => x.overridable && !x.repeatable).map((x) => x.flat));
+
+export function isOverridable(key) {
+  return OVERRIDABLE_KEYS.has(key);
+}
+
 export function isEmptyValue(v) {
   return v === null || v === undefined || String(v).trim() === '';
 }
@@ -358,6 +371,7 @@ export function exportSchema() {
         options: field.options,
         hint: field.hint,
         recommended: field.recommended,
+        overridable: field.overridable,
         pattern: field.validate
           ? { source: field.validate.pattern.source, flags: field.validate.pattern.flags, message: field.validate.message, level: field.validate.level }
           : null,
@@ -418,6 +432,30 @@ export function validateValues(values) {
     }
   });
   return { errors, warnings };
+}
+
+// 校验版本覆盖集：键必须在白名单内、值必须是字符串、不能覆盖可重复区段。
+export function validateOverrides(overrides) {
+  const errors = [];
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (!OVERRIDABLE_KEYS.has(key)) {
+      errors.push({ level: 'error', key, label: key, message: '这个字段不允许被版本覆盖（只有口径类字段可以）' });
+      continue;
+    }
+    if (typeof value !== 'string') {
+      errors.push({ level: 'error', key, label: key, message: '覆盖值必须是字符串' });
+    }
+  }
+  return errors;
+}
+
+// 基准 ⊕ 覆盖。版本只存差异，通用事实永远只来自基准。
+export function mergeValues(base, overrides) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (OVERRIDABLE_KEYS.has(key)) merged[key] = value;
+  }
+  return merged;
 }
 
 // 计数：分母只含 SCORED 的分类（见 isScored 的两条理由）。
