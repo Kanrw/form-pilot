@@ -184,8 +184,11 @@ function entries() {
       block = sec.kind + '[' + sec.rowIndex + ']';
       id = block + '>>' + label;
     } else if (A.blockSections) {
+      // main 分支同样要消歧：两个非重复区块里出现同名字段时，
+      // 裸 `main>>label` 不是单射，fillTexts 的 map key 会互相覆盖。
+      seen[label] = (seen[label] || 0) + 1;
       block = 'main';
-      id = 'main>>' + label;
+      id = seen[label] > 1 ? 'main>>' + label + '#' + seen[label] : 'main>>' + label;
     } else {
       seen[label] = (seen[label] || 0) + 1;
       block = 'main';
@@ -200,23 +203,30 @@ function findField(id) {
   if (m) {
     const kind = m[1] || null;
     const row = m[2] === undefined ? null : +m[2];
-    const label = m[3];
+    const raw = m[3];
+    const lm = /^(.*)#(\d+)$/.exec(raw);
+    const base = lm ? lm[1] : raw;
+    const nth = lm ? +lm[2] : 1;
+    let hit = 0;
     for (const e of entries()) {
-      if (norm(e.label) !== norm(label)) continue;
+      if (norm(e.label) !== norm(base)) continue;
       if (kind === null) {
-        if (e.block === 'main') return e.box;
-        continue;
+        if (e.block !== 'main') continue;
+      } else {
+        const s = sectionOf(e.box);
+        if (!s || s.kind !== kind || s.rowIndex !== row) continue;
       }
-      const s = sectionOf(e.box);
-      if (s && s.kind === kind && s.rowIndex === row) return e.box;
+      hit++;
+      if (hit === nth) return e.box;
     }
     return null;
   }
-  const lm = /^(.*)#(\d+)$/.exec(id);
-  const label = lm ? lm[1] : id;
-  const nth = lm ? +lm[2] : 1;
+  // 旧式 label / label#n（适配器未声明 blockSections 时的 ID 形态）
+  const lm2 = /^(.*)#(\d+)$/.exec(id);
+  const label = lm2 ? lm2[1] : id;
+  const nth2 = lm2 ? +lm2[2] : 1;
   const hits = fields().filter((b) => norm(labelOf(b)) === norm(label));
-  return hits[nth - 1] || null;
+  return hits[nth2 - 1] || null;
 }
 
 // ── 菜单 ────────────────────────────────────────────────

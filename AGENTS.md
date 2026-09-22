@@ -121,109 +121,179 @@
 ## 四、基础设施现状
 
 - Kimi WebBridge daemon：`http://127.0.0.1:10086/command`
-- ⚠️ **桥接状态是当场读数，不是本文件的常驻事实**。已记录历史值 `running:true + extension_connected:true`，
-  但 2026-09-22 10:11 的日志显示 daemon 被终止（`sig: terminated`）→ **恢复使用前必须重新 `status` 确认，
-  不得引用本行历史值**。
-- 状态检查：`~/.kimi-webbridge/bin/kimi-webbridge status`
-- 恢复：`~/.kimi-webbridge/bin/kimi-webbridge start`
+- 状态检查：`node scripts/status.mjs`（或 `~/.kimi-webbridge/bin/kimi-webbridge status`）
+- 启动：`~/.kimi-webbridge/bin/kimi-webbridge start`
 - macOS/Linux 调用模板：`curl -s -X POST http://127.0.0.1:10086/command -H 'Content-Type: application/json' -d '{"action":...,"args":...,"session":"..."}'`
 - Windows：内联 JSON 会乱码，必须用 `--data-binary @file`
-- 固定 session 名约定：同一任务一个 session，如 `form-v2-analysis`、`adapter-research`
+- 固定 session 名约定：同一任务一个 session，如 `form-v01`、`adapter-research`
 
-## 五、适配器注册表（当前出厂状态）
+**桥接状态是当场读数，不是本文件的常驻事实。** 2026-09-22 发生过两次状态反转（10:11 daemon 被终止、
+11:35 恢复）——**每次使用前必须重新 `status`，不得引用任何历史值**。
 
-文件：`engine/adapters.js`（待从 `skill/references/adapters.md` 提取改造为 IIFE）
-当前三注册项（下表是**设计稿，文件尚未落盘**）：
+**session → tab 绑定是易失的。** 实测：tab 关闭后同一 session 的 `evaluate` 直接报
+`session "x" tab was closed — navigate first to recreate`。所以每个 session 的第一步永远是 `navigate`。
+`inject.mjs` 不负责导航，它只注入。
 
-| 适配器 | fieldSel | labelSel | menuSel | itemSel | valueSel | verified | source |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `moka` | `[class*=apply-field]` | `[class*=title]` | `[class*=sd-Select-menu],[class*=sd-Menu-container]` | `[class*=sd-Menu-content-item]` | `[class*=sd-Input-display-value]` | `2026-09-22` | `https://app.mokahr.com/...` |
-| `beisen` | `.form-item` | `label` | `.common-unmodeled-layer` | `.phoenix-selectList__singleLabel,.list-item-container` | `.phoenix-select__placeHolder` | `null` | `docs-only` |
-| `generic` | `null` | `null` | `null` | `li,[role=option],...` | `null` | 探针模式 | — |
+**status 在 running 态的完整字段**（2026-09-22 实测）：
+`extension_connected, extension_id, extension_version, port, running, skills[], update_available{}, uptime_seconds, version`。
+`running:false`（缺 daemon）与 `extension_connected:false`（缺浏览器/扩展）是两种故障、两种修法。
 
-北森特异（来自 v1 指南文档，未实测）：
-- 单选是 `div.phoenix-radio`（不是原生 radio），点自定义单选
-- 多选样式 `.list-item-container`，选完要点面板内"确定"按钮（`.phoenix-button`）才生效
-- 菜单 portal 在 body 底部 `.common-unmodeled-layer`（取高度>100 的可见者）
+## 五、适配器注册表
 
-## 六、引擎 API 最终形态
+文件：`engine/adapters.js` —— **已落盘**（IIFE 挂 `window.__jaAdapters`，幂等）。三个注册项：
 
-文件：`engine/engine.js`（待从 `skill/references/engine.md` 提取）
-全部挂 `window.__ja`，单文件 IIFE，幂等（`if (window.__ja) return`）。
+| 适配器 | verified | source | fieldSel |
+| --- | --- | --- | --- |
+| `moka` | `2026-09-22` | CATL 校招申请页（只读探测） | `[class*=apply-field-]` |
+| `beisen` | `null` | `docs-only` | `.form-item` |
+| `generic` | `null` | `builtin` | 空（走引擎默认：input 就近容器） |
 
-标 ⏸ 的条目按 §2.4 推迟，触发条件出现前不实现，也不在 engine.js 里留占位。
+**moka 的选择器（实测）**：
 
 ```
-__ja.version                                        // 版本号取值待定，见 04 审查 U4
-__ja.use(adapter)                                   // 注册并切换适配器
-__ja.detect()         → 'moka'|'beisen'|'generic'
-__ja.scan({offset,limit}) → {total, fields:[{id,type,required,value}]}
-__ja.addRow(kind)     → {ok, index}                 // 添加经历行
-__ja.fillTexts(map)   → {ok,failed[],retried[],unchanged[]}
-__ja.pickOption(id,text,{mode:'single'|'multi',search})  // 下拉
-__ja.readAll({offset,limit})                        // 分页回读
-⏸ __ja.probeEnv()     → {shadowHosts, iframes[]}    // R5
-⏸ __ja.snapshot()     → {count}                     // R9 填前快照
-⏸ __ja.setPlan(ids[])                               // R9 计划变更集合
-⏸ __ja.setChoice(id,value)                          // R3 单选/多选/布尔统一入口
-⏸ __ja.fillDate(id,'YYYY-MM-DD') → {ok}|{manual:true}     // R4 日期试探
-⏸ __ja.diff()         → {changed[],outside[],missing[]}   // R9 核对报告
+fieldSel         [class*=apply-field-]     ★ 尾横线不可省，见下
+labelSel         [class*=title]
+menuSel          [class*=sd-Select-menu],[class*=sd-Menu-container]
+itemSel          [class*=sd-Menu-content-item]
+valueSel         [class*=sd-Input-display-value]
+blockSectionSel  [class*=apply-block-]     区块
+blockGroupSel    [class*=apply-fields-]    行分组（行索引来源）
+addText          '添加'
+typeMap          string_info→text / select_info→select / bool_info→select /
+                 Select→select / multi_select_info→select / day_info→date /
+                 date_info→date / location_info→cascade / confirm_info→choice /
+                 file_upload→file / portrait_upload→file / custom_file_upload→file
+blockSections    edu 教育背景 / intern 实习经历 / proj 项目经验 / scholar 获奖学金经历 /
+                 campus 校内活动经验 / paper 核心期刊论文发表 /
+                 patent 个人专利/发明 / contest 竞赛经历 / skill 技能/爱好
 ```
+
+**三条实测校正（2026-09-22，别再退回）**：
+
+1. **`fieldSel` 的尾横线**。裸 `[class*=apply-field]` 会同时命中 16 个复数行分组容器
+   `apply-fields-*`，把 wrapper 当字段（实测真字段 49 个 → 误报 65 个）。
+2. **`bool_info` 是下拉，不是文本框**。它是 `sd-Select-container` + `sd-Input-display-value`，
+   且 input **不是** readonly → 引擎的启发式（类名含 select？占位符含"请选择"且 readonly？）
+   两条都落空 → 会误判成 `text` → 往下拉输入框写值不生效且不报错。所以必须走 `typeMap`。
+   `location_info`（籍贯）同理曾是漏网之鱼。
+3. **加行按钮的文本是"添加"两个字，页面上 6 个按钮全叫这个**。规划里写的
+   `addRowText: '添加教育经历'` 不存在于 DOM。按文本匹配必然选错，只能区块内定位；
+   `addRow` 用"区块内定候选 → 取文本最短者 → 行分组计数 +1 验证"（见 §六 内部方法表）。
+
+**北森**（来自 v1 指南，未实测）：单选是 `div.phoenix-radio`；多选样式 `.list-item-container`，
+选完要点面板内"确定"（`.phoenix-button`）才生效；菜单 portal 在 body 底部的
+`.common-unmodeled-layer`（取高度>100 的可见者）。
+**刻意不声明 `blockSections` / `typeMap`——没有真实探测就没有依据。**
+这两项属 R3，按 §2.4 推迟到首次实际使用。
+
+## 六、引擎 API
+
+文件：`engine/engine.js` —— **已落盘**。全部挂 `window.__ja`，单文件 IIFE，幂等。
+标 ⏸ 的条目按 §2.4 推迟：**触发条件出现前不实现，也不在 engine.js 里留占位或骨架。**
+
+```
+__ja.version                                   → '0.1.0'（三处一致，见 §十 同步方案）
+__ja.use(adapter)                              → adapter.name（Object.assign，可重复调用）
+__ja.detect()                                  → 'moka' | 'beisen' | 'generic'
+__ja.scan()                                    → {total, fields:[{id,block,label,type,required,value}]}
+__ja.readAll()                                 → [{id,block,label,type,value}]
+__ja.addRow(kind)                              → {ok,kind,from,to,added} | {ok:false,err:'section-not-found'
+                                                  |'add-button-not-found'|'row-not-added'|...}
+__ja.fillTexts(map)                            → {ok:number, failed:[{id,phase,err,attempted,final}],
+                                                  retried:[id]}
+__ja.pickOption(id, text, {search=true})       → {ok,value} | {ok:false,err:'field-not-found'
+                                                  |'menu-not-open'|'option-not-found'|'item-detached'}
+⏸ __ja.probeEnv()      ⏸ __ja.snapshot()      ⏸ __ja.setPlan(ids)
+⏸ __ja.setChoice(id,v) ⏸ __ja.fillDate(id,ymd) ⏸ __ja.diff()
+```
+
+- `type` 枚举：`text | textarea | file | select | date | cascade | choice | unknown`。
+  `fillTexts` 只处理 `text`/`textarea`，其余跳过并在 `failed[].err` 里归类为 `not-text:<type>`。
+- `phase` 枚举：`locate | fill | verify`。
+- **文件上传不经引擎**：JS 拿不到 File 对象，走桥的 `upload` 动作，引擎不提供上传接口。
+- `scan`/`readAll` **没有分页参数**（§2.4 已删）。返回值超限再说。
+
+**内部方法命名（固定，不许现编）**：
+`sleep / norm / trunc / j / setNativeValue / synthClick / fields / labelOf / heuristicType / typeOf /`
+`firstTitle / rowIndexOf / sectionOf / sectionByKind / groupCount / readSelect / valueOf /`
+`isRequired / entries / findField / visibleMenus / menuItems / matchItem`
 
 内部规约（不可违反）：
 - 元素引用不得跨 sleep 复用（stale 免疫）
-- 菜单操作串行，`_busy` 锁
-- 返回值一律 compact JSON.stringify，无空格，单字段 value ≤200 字符
-  （截断适用于**所有**返回字段，含失败报告里的 `attempted` / `final`）
+- 菜单操作必须串行 —— 由调用方保证；引擎 0.1.0 **不加 `_busy` 锁**（见 §2.4 R8）
+- 返回值一律 compact `JSON.stringify`，无空格；**所有**字符串字段截断 200 字符
+  （含失败报告里的 `attempted` / `final`）
+- `firstTitle` 固定用宽选择器，不用 `A.labelSel`：区块标题的父元素类名各站点不同，
+  而标题在 DOM 序上先于区块内字段
 
 ## 七、适配器字段 ID 格式
 
 ```
-main>>label                    # 普通字段（单一条，无重复）
-edu[0]>>学校名称               # 区块化：kind[rowIndex]>>label
-edu[1]>>学校名称               # 添加一行后，新行 index=1
-work[0]>>公司名
+<kind>[<rowIndex>]>><label>    # 区块命中（kind 来自适配器 blockSections）
+main>><label>                  # 非区块字段
+main>><label>#<n>              # 同上，但 label 在同一次 scan 内重复（n≥2）
+<label> / <label>#<n>          # 适配器未声明 blockSections 时的降级形态
 ```
 
-区块签名（适配器声明 blockSels）：Moka 待定字段（`blockSels`/`addRowText` 是 plan 01 R2 的设计，
-尚未在 engine.js 中实现）。
-⚠️ **plan 01 R2 给出的 `'[class*=educations] [class*=form-item-wrap]'` 与按钮文本从未在真实 DOM 上验证过**
-（见 04 审查 U1）。实现 R2 前必须先跑只读探针确认；探不出来则退回 `main>>label` 单层 ID，
-并把 `addRow` 一并推迟。
+Moka 实测样例（2026-09-22）：
+
+```
+edu[0]>>学校名称       edu[0]>>就读时间     edu[0]>>受教育类型    edu[0]>>学历
+edu[0]>>院系           edu[0]>>专业名称     edu[0]>>研究方向      edu[0]>>GPA
+intern[0]>>是否有实习经历                    skill[0]>>英语等级
+main>>推荐码           main>>是否内推        main>>上传简历
+```
+
+**4 级结构（实测）**：`apply-blocks-*`(1) → `apply-block-*`(16 个区块) → `apply-fields-*`(行分组)
+→ `apply-field-*`(49 个字段)。`kind` 由区块标题前缀匹配 `blockSections` 得出；
+`rowIndex` 是该字段所在行分组在区块内的序号（0 起）。
+
+**ID 必须单射。** 它是 `fillTexts(map)` 的 key，重名即静默填错字段。
+Plan 01 R2 原本只对 `main` 前缀消歧，实测发现非重复区块之间也可能撞名，故 `main` 分支同样加 `#n`。
+**已验收**：Moka 页 scan → `total 49 / unique 49 / duplicate 0`。
+
+**未验收**：`addRow` 之后的 ID 稳定性（加一行 → 出现 `edu[1]>>` 且 `edu[0]>>` 不变）。
+需要一次受控写，属 Phase 2。触发条件未出现前不宣称它成立。
 
 ## 八、故障降级链
 
 合成事件 → CDP 坐标点击（`Input.dispatchMouseEvent`）→ 列入"待用户手动清单"
 （不在一个控件上反复重试）。
 
-## 九、项目结构蓝图（待 build）
+## 九、项目结构
+
+**已落盘**（Phase 1）：`.gitignore`、`package.json`、`engine/engine.js`、`engine/adapters.js`、
+`scripts/status.mjs`、`scripts/inject.mjs`、`tests/` 两个 0 字节占位。
+**尚未**（Phase 2/3）：`skill/`（当前只有空的 `agents/`、`references/` 目录）、`tests/engine.test.mjs`、
+`tests/fixtures/`、`scripts/sync-skill.mjs`、`scripts/capture-fixture.mjs`、README / LICENSE / CHANGELOG、
+`docs/guide-v2.md`。
 
 ```
 form-pilot/
-├── README.md / AGENTS.md / LICENSE(MIT+上游署名) / CHANGELOG.md / .gitignore
-├── package.json          # scripts.test = "node --test tests/"；devDependencies: jsdom
-├── engine/               # 代码唯一事实源
+├── README.md / LICENSE(MIT+上游署名) / CHANGELOG.md    ← Phase 3
+├── AGENTS.md / .gitignore / package.json               ← 已落盘
+├── engine/               # 代码唯一事实源                        ← 已落盘
 │   ├── engine.js         # 单文件IIFE，挂 window.__ja
 │   └── adapters.js       # IIFE幂等挂载 window.__jaAdapters（含 verified 日期）
-├── skill/                # 技能包（自包含可分发）
+├── skill/                # 技能包（自包含可分发）                ← Phase 3
 │   ├── SKILL.md
 │   ├── agents/openai.yaml
 │   └── references/
-│       ├── engine.js     # 【生成物】sync 复制
+│       ├── engine.js     # 【生成物】sync 复制，禁手改
 │       ├── adapters.js   # 【生成物】同上
 │       ├── usage.md      # 手工维护散文
 │       └── kimi-webbridge.zh-CN.md  # 从 v1 复制
 ├── scripts/
-│   ├── sync-skill.mjs    # engine/ → skill/references/ → ~/.config（单向，含GENERATED头）
-│   ├── inject.mjs        # 读engine+adapters拼字符串，POST一次evaluate
-│   ├── status.mjs        # 桥接健康检查
-│   └── capture-fixture.mjs  # 抓当前页表单outerHTML
-├── tests/
+│   ├── status.mjs        # 桥接健康检查（区分两种故障）           ← 已落盘
+│   ├── inject.mjs        # 读engine+adapters拼字符串，POST一次evaluate  ← 已落盘
+│   ├── sync-skill.mjs    # engine/ → skill/references/ → ~/.config（单向，含GENERATED头）  ← Phase 3
+│   └── capture-fixture.mjs  # 抓当前页表单outerHTML               ← Phase 2
+├── tests/                                                        ← Phase 2
 │   ├── engine.test.mjs   # node:test + jsdom
 │   ├── helpers/jsdom-setup.mjs  # offsetHeight/scrollIntoView桩
 │   ├── fixtures/         # 脱敏HTML（raw/进.gitignore）
 │   └── manual-e2e.md     # 真实浏览器回归清单
-└── docs/plans/           # 00-04 规划与审查文档
+└── docs/plans/           # 00-05：规划、审查、执行路线
 ```
 
 ## 十、同步方案（唯一事实源）
@@ -232,25 +302,32 @@ form-pilot/
 `skill/references/*.js`（注入 GENERATED 头，禁手改），生成物提交进 git，
 再整树部署到 `~/.config/opencode/skills/job-apply-v2/`。`--check` 只 diff 不写。
 
-## 十一、下一步执行事项（按依赖序）
+## 十一、进度与下一步
 
-1. `.gitignore` 写实（`.DS_Store`、`node_modules/`、`tests/fixtures/raw/`）；
-   `git add -A && git commit` 首提交（当前仓库**零提交**，安全网尚未成立）
-2. 补 `package.json`（`scripts.test`、`devDependencies: jsdom`）
-3. 启动桥接并重新确认状态；记录 `status` 在 running 态的完整字段名
-4. 开 Moka CATL 申请页跑**只读探针**：确认（或推翻）§七 的 blockSels 与加行按钮文本
-5. 写 `capture-fixture.mjs`，抓 Moka 表单 `outerHTML` → 脱敏 → `tests/fixtures/`
-6. 从 `skill/references/engine.md` 抽 `engine/engine.js`（原样，仅加版本头注释）
-7. 从 `skill/references/adapters.md` 抽 `engine/adapters.js`，改 IIFE 幂等挂载
-8. 散文迁至 `skill/references/usage.md`
-9. 复制 `kimi-webbridge.zh-CN.md`、`SKILL.md`、`agents/` 入 `skill/`
-10. 写四个 scripts 并首跑 `sync-skill.mjs` 验证部署到 `~/.config`
-11. 引擎加固：**只做 v0.1.0 最小集 R1 / R2 / R6 / R7**（依据 `04-reality-check-2026-09-22.md` §六），
-    在 Moka 端到端验证。其余见 §2.4 的触发条件
-12. `npm test` + jsdom 桩
-13. 写 README/AGENTS/LICENSE/CHANGELOG
-14. 写 `docs/guide-v2.md`；给 v1 指南加存档指向行（v1 指南在 `~/Documents/FindAJob/docs/`，
-    在 form-pilot 仓库之外，跨目录引用需写相对路径）
+**路线图的唯一事实源是 `docs/plans/05-execution-architecture.md` §六**（三个 Phase，各自独立可合并）。
+本节只记进度，**不重复那份列表**——两份执行清单必然漂移。
 
-实施序（v0.1.0 最小集）：R1菜单归属 → R2区块ID → R6报告格式 → R7分块。
-其后按触发条件解锁，01 规划原始序中 R9/R3/R4/R8/R5 均已推迟。
+### Phase 1 · 骨架 + 引擎可注入 —— 已完成（2026-09-22）
+
+| 验收 | 结果 |
+| --- | --- |
+| `node scripts/status.mjs` | `{"ok":true,"running":true,"extension_connected":true}`，exit 0 |
+| `node scripts/inject.mjs --session form-v01` | `{"ok":true,"engine":"loaded","adapter":"moka","version":"0.1.0"}`，exit 0 |
+| 真实 Moka 页 `__ja.scan()` | `total 49 / unique 49 / duplicate 0`；ID 形如 `edu[0]>>学校名称`；类型经 `typeMap` 映射 |
+
+**已知未验收项**：`addRow` 的"加行后 ID 不漂移"需要一次受控写，属 Phase 2。
+`findField` 的定位往返也没在真实页验过（公开 API 没有只读的定位入口，写了就是改表单）——
+它进 Phase 2 的 jsdom 用例。
+
+### Phase 2 · 填写闭环 —— 未开始
+
+验收含**受控写**（批量填文本 + 逐个下拉 + 加行 + 回读），必须用户在场监督、停在提交前。
+
+### Phase 3 · 分发与文档 —— 未开始
+
+与桥接完全解耦。桥不可用时它就是唯一能推进的部分。
+
+### git
+
+分支 `main`。Phase 1 期间三个快照：仓库基线 → engine/ → scripts/ + 本文档修订。
+提交粒度按"一个可独立回退的单元"，不按时间。
