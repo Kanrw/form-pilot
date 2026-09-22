@@ -38,4 +38,12 @@ export function readFixture(name) {
   return readFileSync(join(ROOT, 'tests/fixtures', name), 'utf8');
 }
 
+// 档案界面脚本同样是浏览器 IIFE，同样不该被 Node 的模块系统加载。
+// 加载后不自动启动：boot 只在带 [data-profile-editor] 的真页面骨架里跑，
+// 测试用的空壳拿到的是一组可直接调用的渲染函数。
+export function loadProfileEditor(dom) {
+  dom.window.eval(readFileSync(join(ROOT, 'tools/profile-editor.js'), 'utf8'));
+  return dom.window.__profileEditor;
+}
+
 export const MOKA = 'moka.html';

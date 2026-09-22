@@ -1,0 +1,597 @@
+/* 个人档案界面 —— 登记表版式。
+ *
+ * 设计要点（docs/plans/06-profile-ui.md §六）：
+ *   单层表面 + 细线分层 —— 没有卡片、没有阴影、没有渐变，层级全靠 1px 分隔线；
+ *   全页唯一的重色是三分类标记，颜色只由 autofill 决定；
+ *   字体用系统栈，不引网络字体（本地工具必须离线可用）。
+ *
+ * 圆角阶梯 3/6/10/pill、间距阶梯 4/8/12/16/24/32 先定死，不在组件里现编。
+ */
+
+:root {
+  --paper: oklch(0.978 0.003 92);
+  --ink-1: oklch(0.22 0.008 80);
+  --ink-2: oklch(0.46 0.008 80);
+  --ink-3: oklch(0.56 0.006 80);
+  --rule: oklch(0.905 0.004 85);
+  --rule-2: oklch(0.82 0.005 85);
+  --auto: oklch(0.46 0.075 245);
+  --confirm: oklch(0.58 0.1 72);
+  --never: oklch(0.52 0.15 28);
+  --never-bg: oklch(0.96 0.02 28);
+  --focus: oklch(0.55 0.1 245);
+
+  --r-sm: 3px;
+  --r-md: 6px;
+  --r-lg: 10px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink-1);
+  font: 400 13px/1.7 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+h2 {
+  font-size: 14px;
+}
+
+p {
+  margin: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip-link:focus {
+  position: static;
+  display: inline-block;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+:where(a, button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* ── 顶栏 ───────────────────────────────────────────────────── */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule-2);
+}
+
+.topbar-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.file {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.stat {
+  font-variant-numeric: tabular-nums;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.badge-never {
+  background: var(--never-bg);
+  color: var(--never);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+button {
+  padding: 5px 12px;
+  border: 1px solid var(--rule-2);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  color: var(--ink-1);
+  font: 400 12px/1.5 var(--font-sans);
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--auto);
+  border-color: var(--auto);
+  color: var(--paper);
+  font-weight: 500;
+}
+
+button.link {
+  border: 0;
+  padding: 2px 4px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.banner strong {
+  font-weight: 500;
+  color: var(--ink-1);
+}
+
+/* ── 三栏骨架 ───────────────────────────────────────────────── */
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(170px, 210px) minmax(0, 1fr) minmax(190px, 240px);
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.rail {
+  padding: 16px 14px 32px 20px;
+  border-right: 1px solid var(--rule);
+}
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: 400 12px/1.5 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rail-item::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--rule-2);
+}
+
+.rail-item[aria-current='true'] {
+  color: var(--ink-1);
+  font-weight: 500;
+}
+
+.rail-item[aria-current='true']::before {
+  background: var(--auto);
+}
+
+.rail-item .count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.main {
+  padding: 16px 24px 48px;
+  min-width: 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.section-head .meta {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.segment {
+  margin-top: 20px;
+}
+
+.segment-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--rule-2);
+}
+
+.segment-head .ord {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.segment-head .spacer {
+  margin-left: auto;
+}
+
+/* ── 字段行 ─────────────────────────────────────────────────── */
+
+.field-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 104px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field-row .field-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.field-row input,
+.field-row textarea,
+.field-row select {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--rule-2);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  color: var(--ink-1);
+  font: 400 13px/1.6 var(--font-sans);
+}
+
+.field-row input[type='date'] {
+  font-variant-numeric: tabular-nums;
+}
+
+.field-row textarea {
+  resize: vertical;
+}
+
+.range-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.range-control input[type='date'] {
+  width: auto;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.range-sep {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.range-note {
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.field-row .field-msg {
+  grid-column: 2 / -1;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.field-row.is-error input,
+.field-row.is-error textarea,
+.field-row.is-error select {
+  border-color: var(--never);
+}
+
+.field-row .field-msg.msg-error {
+  color: var(--never);
+}
+
+.field-row .field-msg.msg-warn {
+  color: var(--confirm);
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.mark::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.mark-auto {
+  color: var(--auto);
+}
+
+.mark-confirm {
+  color: var(--confirm);
+}
+
+.mark-never {
+  color: var(--never);
+}
+
+.mark-muted,
+.mark-path,
+.mark-note {
+  color: var(--ink-3);
+}
+
+.path-badge {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.path-badge.missing {
+  color: var(--never);
+}
+
+.fence {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px dashed var(--never);
+  border-radius: var(--r-md);
+}
+
+.fence-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--never);
+}
+
+.fence-note {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.fence .field-row:last-child {
+  border-bottom: 0;
+}
+
+/* ── 右栏 ───────────────────────────────────────────────────── */
+
+.aside {
+  padding: 16px 20px 32px 16px;
+  border-left: 1px solid var(--rule);
+  font-size: 12px;
+}
+
+.aside h2 {
+  margin-bottom: 8px;
+}
+
+.aside .stat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.aside .stat-row .num {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.aside .divider {
+  margin: 10px 0;
+  border-top: 1px solid var(--rule);
+}
+
+.aside .legend {
+  padding: 2px 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.aside .manual-item {
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.aside .stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.aside .stack button {
+  width: 100%;
+}
+
+/* ── 动效：只有"保存"这一件事动 ────────────────────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  button {
+    transition-property: transform, background-color, border-color;
+    transition-duration: 120ms;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  button:active {
+    transform: scale(0.96);
+  }
+
+  .field-row.is-saved::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--auto);
+    transform-origin: left center;
+    animation: sweep 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* ── 断点：1280 三栏 → 1024 右栏落底 → 768 左轨变横条 ───────── */
+
+@media (max-width: 1024px) {
+  .shell {
+    grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
+  }
+
+  .aside {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--rule);
+    padding: 16px 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rail {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .rail-item {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .rail-item .count {
+    margin-left: 4px;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .topbar-meta {
+    margin-left: 0;
+  }
+
+  .main {
+    padding: 12px 16px 40px;
+  }
+
+  .field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding: 8px 0;
+  }
+
+  .range-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.range-control input[type='date'] {
+  width: auto;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.range-sep {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.range-note {
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.field-row .field-msg {
+    grid-column: 1 / -1;
+  }
+}

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>个人档案 · form-pilot</title>
+<link rel="stylesheet" href="/tools/profile-editor.css">
+</head>
+<body>
+
+<a class="skip-link" href="#fields">跳到字段区</a>
+
+<header class="topbar">
+  <div class="topbar-main">
+    <h1>个人档案</h1>
+    <p class="file" id="file-path">读取中…</p>
+  </div>
+  <div class="topbar-meta">
+    <span class="stat" id="stat-completeness" title="已填 / 需填。不含「永不自动填」的字段">—</span>
+    <span class="stat" id="save-state">尚未改动</span>
+    <span class="badge badge-never">本地文件 · 不入库</span>
+  </div>
+  <div class="topbar-actions">
+    <button type="button" class="primary" id="save">保存</button>
+  </div>
+</header>
+
+<div class="banner" id="banner" hidden></div>
+
+<main class="shell" id="fields" data-profile-editor>
+
+  <nav class="rail" id="rail" aria-label="区段"></nav>
+
+  <section class="main" id="main" aria-live="polite"></section>
+
+  <aside class="aside" id="aside"></aside>
+
+</main>
+
+<script src="/tools/profile-editor.js"></script>
+
+</body>
+</html>
