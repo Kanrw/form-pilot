@@ -1,9 +1,12 @@
 // jsdom 打桩与引擎加载。
 //
-// 两个 jsdom 缺陷必须补，否则引擎的核心过滤逻辑全灭：
+// 三个 jsdom 缺陷必须补，否则引擎的核心过滤逻辑全灭：
 //   1. jsdom 不做布局 → offsetHeight 恒 0 → fields() 的 `offsetHeight > 0` 把所有字段滤掉。
 //      桩返回 40 而不是 1：同时满足 visibleMenus 的 `> 30`，将来测菜单不用改桩。
 //   2. scrollIntoView 未实现 → synthClick 会抛。
+//   3. jsdom 没有真实可见性 → document.hidden 恒 true（visibilityState 默认 prerender），
+//      引擎的前台守卫会因此拒掉每一个异步方法。桩成 false；
+//      需要测"后台标签页"的用例自己 defineProperty 覆盖回去。
 //
 // 加载方式刻意用 `dom.window.eval(源码字符串)` 而不是 `import`：
 // 引擎是浏览器 IIFE，不该被 Node 的模块系统加载（package.json 因此不设 type）。
@@ -19,6 +22,10 @@ export function makeDom(html) {
   const dom = new JSDOM(html, { runScripts: 'outside-only' });
   Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', {
     get() { return 40; },
+    configurable: true,
+  });
+  Object.defineProperty(dom.window.document, 'hidden', {
+    get() { return false; },
     configurable: true,
   });
   dom.window.Element.prototype.scrollIntoView = function () {};

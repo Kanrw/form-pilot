@@ -5,7 +5,7 @@
 > 用户决策（2026-09-22）：**技术路线 B**（本地 Node 单文件服务）；**视觉方向 A（登记表）**。
 > C（源码 + 预览分栏）不做；B（问答向导）实现后由使用者判定"太累赘、没有用"，已整块撤掉（见 §六）。
 > 数据模型采用 `private/profile.json` 唯一事实源（推荐项，用户未提异议）。
-> **实施状态（2026-09-22）：Phase 1 与 Phase 2 均已落地**，`npm test` 35 例全绿。
+> **实施状态（2026-09-22）：Phase 1 与 Phase 2 均已落地**，`npm test` 45 例全绿（引擎 11 + 档案 34）。
 > 实现与本规划的偏差集中在 §十三。
 
 ## 一、要解决的问题
@@ -115,7 +115,7 @@
 算进分母等于永远扣分。`note` 不计：那是给人看的说明，而且 `answers` 预置的三个题目
 会让完整度一开始就不是 0，用户第一眼就失去判断。
 
-**字段清单不在这里复制。** 唯一来源是 `tools/profile.schema.mjs`（当前 14 个区段、84 个字段位）。
+**字段清单不在这里复制。** 唯一来源是 `tools/profile.schema.mjs`（当前 14 个区段、86 个字段位）。
 本文转述一份的结果只会是两处事实源、两处漂移 —— 要字段表就跑：
 
 ```bash
@@ -373,7 +373,7 @@ Phase 2 是浪费** —— 这一条在 Phase 1 验收后重判一次。
 ### 验证证据
 
 ```bash
-npm test                       # 29 例全绿（引擎 11 + 档案 18）
+npm test                       # 45 例全绿（引擎 11 + 档案 34）
 node scripts/profile.mjs --init / --import / --check / --render   # 见下
 node scripts/profile.mjs --ui --port 8791                          # 路由与守卫实测
 ```
@@ -525,7 +525,7 @@ ISO 回显仍然保留 —— 显示格式与存储格式不一致这件事本�
 **文件与命令**
 
 ```
-private/profile.json              基准档案（唯一事实源，84 个字段位）
+private/profile.json              基准档案（唯一事实源，86 个字段位）
 private/profiles/<版本名>.json     只存差异：{ version, name, note, overrides: { 键: 值 } }
 ```
 
@@ -541,6 +541,41 @@ private/profiles/<版本名>.json     只存差异：{ version, name, note, over
 被覆盖的 2 行带徽章与还原按钮且仍可编辑、右栏「本版本覆盖 2 项」、无横向溢出。
 **顺手抓到一个真 bug**：`createHandler` 只给 PUT 读了请求体 → `POST /api/versions` 永远拿到空对象，
 界面上的「新建版本」会直接报"版本名不能为空"。已修并加用例盯住这条路径。
+
+### 第七轮：拆分「紧急联系人」——首次真实填表暴露的建模错误
+
+第一次真实投递（Moka · 宁德时代校招）填到「紧急人联系电话」时暴露：档案把姓名和电话压在
+一个字符串里（`basic.emergencyContact = '<姓名> <电话>'`），而表单只问电话。
+
+| 变化 | 命名失败 |
+| --- | --- |
+| `basic.emergencyContact` → `emergencyContactName` + `emergencyContactPhone` | 只想取电话的表单格拿不到值；把整串「<姓名> <电话>」填进电话格，会在第三方系统里造出一条拨不通的记录 |
+
+配套两点：
+
+- `emergencyContactPhone` 用 `tel` 类型 + 宽松校验（允许区号与分隔符）。**不套 `phone` 那条手机号正则** ——
+  紧急联系人可能是座机，套上只会把能填的值判成格式错。两个字段都保持 `confirm`（第三方个人信息）。
+- `docs/profile-template.md` 同步拆成两行。这一步**被测试直接挡住过一次**：
+  「导入 docs/profile-template.md：字段位无遗漏」在 schema 改完而模板没改时立刻报出缺的两个字段位。
+
+数据迁移走 `tools/profile-io.mjs` 的 `readValues` / `writeValues`。值得一提：
+旧键在 schema 里消失后**自动落进 `unknownKeys` 而不是被丢弃** —— 这正是「schema 变了不静默吞数据」
+那条设计在真身上起作用；按 `姓名 + 尾随电话` 拆分后写回，`writeValues` 自带 `.bak`。
+
+结果：字段位 84 → 85，`completeness 172/182` → `173/183`，`errors 0`，`npm test` 45/45。
+
+### 第八轮：补「个人爱好」
+
+第二次真实填写（同一张 Moka 表）时发现 `skill[0]>>个人爱好` 无处可填 —— **档案里根本没有这个字段**，
+而它是本硕博表单的常规一格。使用者直接给了值：**<示例爱好>**。
+
+| 变化 | 命名失败 |
+| --- | --- |
+| `basic` 新增 `hobbies`（单值 `text`） | 表单常单独问一格「个人爱好」。**放不进 `skills`** —— 那是可重复区段（类别 / 内容成对），而爱好是单值，塞进去会变成"每行一份爱好" |
+
+字段位 85 → 86，`completeness 173/183` → `174/184`，`errors 0`，`npm test` 51/51。
+`docs/profile-template.md` 同步加一行 —— 这条又一次被「导入 docs/profile-template.md：字段位无遗漏」
+挡在提交前，说明那道守卫在 schema 增删字段时确实每次都起作用。
 
 ### 仍未覆盖
 

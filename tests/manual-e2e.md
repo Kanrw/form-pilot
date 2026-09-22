@@ -13,6 +13,14 @@ curl -s -X POST http://127.0.0.1:10086/command -H 'Content-Type: application/jso
 node scripts/inject.mjs --session form-e2e
 ```
 
+**★ 目标标签页必须在前台可见。** Chrome 节流后台标签页的定时器，而引擎每个异步方法都靠
+`sleep` 驱动 —— 后台状态下全部变成无限等待（不报错、不返回）。引擎入口有守卫会回
+`err:'tab-hidden'`，但**填到一半被切到后台仍会挂住**。开始前先确认标签页在最前面：
+
+```js
+document.hidden   // 必须是 false
+```
+
 判据一律是**页面上的可见结果**，不是引擎返回值。引擎说 ok 但字段没变，算失败。
 
 ## moka（mokahr.com）｜verified 2026-09-22
@@ -36,6 +44,7 @@ node scripts/inject.mjs --session form-e2e
 | 13 | 故意传一个不存在的 id 给 `fillTexts` | `failed[].phase === 'locate'`，`err === 'field-not-found'` | ☐ |
 | 14 | 合成事件是否被拒 | 若菜单打不开，记录该字段；不在此控件上反复重试 | ☐ |
 | 15 | 最终状态 | **停在提交按钮前，未提交**；截图留档 | ☐ |
+| 16 | `fillMonthRange('edu[1]>>就读时间', '2022-09', '2023-09')` | 4 个下拉依次选中，回读与写入一致。**「就读时间」是选择式月区间，不要用 `fillDate`** —— 它会往 4 个下拉内部的 input 写值，在报错的同时已经写坏控件状态 | ☐ |
 
 ### moka 的已知坑（踩过就别再踩）
 

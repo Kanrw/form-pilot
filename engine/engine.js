@@ -18,6 +18,20 @@ const norm = (s) => (s || '').replace(/[\s*：:]/g, '');
 const trunc = (v) => { const s = v == null ? '' : String(v); return s.length > 200 ? s.slice(0, 200) : s; };
 const j = (o) => JSON.stringify(o);
 
+// ── 前台守卫 ────────────────────────────────────────────
+// 命名失败（2026-09-22 实测）：标签页在后台时 Chrome 节流定时器，`await sleep(...)` **永不返回**，
+// 于是每个异步方法都变成"无限等待"—— 不报错、不返回、也不超时。这是最坏的失败形态。
+//
+// 实测证据：hidden 标签页里 `await new Promise(r => setTimeout(r, 1500))` 30 秒都没触发，
+// 而同一个标签页上的**同步** evaluate 秒回 —— 所以问题出在定时器，不在页面或桥。
+//
+// 为什么不能用"给 sleep 加超时"来兜底：那个超时定时器同样不会触发，兜不住。
+// 只能在入口查可见性，把最常见的"没在前台就开始填"变成明确错误。
+//
+// 局限（写清楚，免得被当成万能）：挡不住"填到一半被切到后台"，那种情况仍会挂住。
+const HIDDEN_HINT = '目标标签页不在前台：Chrome 会节流定时器，所有 await sleep 永不返回。把该标签页切到最前面后重试';
+const tabHidden = () => typeof document !== 'undefined' && document.hidden === true;
+
 // React/Vue 兼容的 native setter 写值
 function setNativeValue(el, value) {
   const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement : HTMLInputElement;
@@ -50,6 +64,8 @@ const A = {
   addText: '添加',
   textInputSel: 'input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea',
   fileSel: 'input[type=file]',
+  rangeSel: null,          // 选择式月区间的容器标记（Moka: [class*=month-range-select]）
+  rangeSelectSel: null,    // 区间内 4 个下拉的容器，DOM 序 = 起始年 / 起始月 / 结束年 / 结束月
 };
 
 // ── 字段与类型 ──────────────────────────────────────────
@@ -234,7 +250,15 @@ function visibleMenus() {
   const all = A.menuSel
     ? [...document.querySelectorAll(A.menuSel)]
     : [...document.body.children].flatMap((d) => [d, ...d.querySelectorAll('[class*=menu],[class*=Menu],[class*=dropdown],[class*=Dropdown],[class*=popper],[class*=option],[role=listbox]')]);
-  return [...new Set(all)].filter((m) => m.offsetHeight > 30);
+  const vis = [...new Set(all)].filter((m) => m.offsetHeight > 30);
+  // ★ 候选之间互相嵌套时只保留最外层。
+  // 命名失败（2026-09-22 Moka 实测）：适配器的 menuSel 同时匹配面板 sd-Select-menu-* 与
+  // 每个选项外层的 sd-Menu-container-*，而后者是前者的后代 —— 点开「民族」一个下拉，
+  // visibleMenus() 返回 59 个元素（1 个面板 + 58 个单项容器），而不是 1 个。
+  // 后果不是选错菜单（面板在文档序更前，fresh[0] 仍是它），而是**失败报告在撒谎**：
+  // pickOption 失败时回的 `menus` 字段会报 59，让现场排查的人以为同时弹出了 59 个菜单。
+  // 返回"菜单及其每一个选项容器"是范畴错误 —— 这个函数的名字就是"菜单"。
+  return vis.filter((m) => !vis.some((o) => o !== m && o.contains(m)));
 }
 
 function menuItems(menu) {
@@ -249,6 +273,59 @@ function matchItem(items, text) {
   if (exact.length) return exact[0];
   const pre = items.filter((x) => norm(x.textContent).indexOf(norm(text)) === 0);
   return pre.length === 1 ? pre[0] : null;
+}
+
+// 清场：把已经展开的菜单关掉。
+//
+// 命名失败（2026-09-22 Moka 实测）：点击一个**已经打开的**触发器不会重新打开菜单，而是把它关掉。
+// 于是上一次失败留下的残留菜单会让下一次 openMenuFor 永远看到"没有新菜单"，
+// 报 menu-not-open —— 而页面其实是好的。表现是"同一个字段第一次失败之后再也填不上，
+// 报错还指向菜单没弹出来"，排查方向完全被带偏。
+//
+// 这一条推翻了 05 §四 D-3 的判断。D-3 当时说"残留菜单本就落在 before 里被差集排除，
+// 找不到可命名的失败"—— 差集确实能排除它作为**候选**，但挡不住"点一下反而关掉"这个副作用。
+// 清场只在这里做，且只在真的有菜单残留时才等待（干净页面上零开销）。
+async function closeMenus() {
+  let n = visibleMenus().length;
+  for (let i = 0; i < 4 && n > 0; i++) {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.body.click();
+    await sleep(150);
+    n = visibleMenus().length;
+  }
+  return n;
+}
+
+// 点开一个触发器，返回新出现的那个菜单。
+// 抽出来是因为月区间要连点 4 个下拉（pickOption 只点 1 个），共用同一段等待与归属逻辑。
+async function openMenuFor(trigger) {
+  await closeMenus();
+  const before = new Set(visibleMenus());
+  synthClick(trigger);
+  for (let i = 0; i < 8; i++) {
+    await sleep(250);
+    const fresh = visibleMenus().filter((m) => !before.has(m) && m.isConnected);
+    if (fresh.length) return { menu: fresh[0], freshCount: fresh.length };
+  }
+  // 删掉原型里的 `|| visibleMenus().pop()` 兜底：它会把常驻菜单当目标。
+  // 找不到就失败，好过选错菜单。
+  return { menu: null, freshCount: 0 };
+}
+
+// 在已打开的菜单里选中一项。返回 {ok, text} 或 {ok:false, err, available}。
+async function chooseIn(menu, optionText, useSearch) {
+  const searchBox = useSearch ? menu.querySelector('input:not([readonly])') : null;
+  if (searchBox && optionText) { setNativeValue(searchBox, optionText); await sleep(400); }
+  const items = menuItems(menu);
+  const target = matchItem(items, optionText);
+  if (!target) {
+    document.body.click();
+    return { ok: false, err: 'option-not-found', available: items.slice(0, 10).map((x) => x.textContent.trim().slice(0, 15)) };
+  }
+  if (!target.isConnected) return { ok: false, err: 'item-detached' };
+  synthClick(target);
+  await sleep(500);
+  return { ok: true, text: target.textContent.trim() };
 }
 
 // ── 公开 API ────────────────────────────────────────────
@@ -291,6 +368,15 @@ window.__ja = {
   // 批量填文本。只处理 text/textarea，其余在报告里归类。
   // 第二遍必须 sleep 之后再读：写入后同步读值恒等于刚写的值，抓不到"被 React 吞掉"。
   async fillTexts(map) {
+    if (tabHidden()) {
+      const ids = Object.keys(map);
+      // 保持 {ok,failed,retried} 的形状不变：调用方不用为这一种失败单独写分支。
+      return j({
+        ok: 0, err: 'tab-hidden', hint: HIDDEN_HINT,
+        failed: ids.map((id) => ({ id, phase: 'locate', err: 'tab-hidden', attempted: trunc(map[id]), final: '' })),
+        retried: [],
+      });
+    }
     const results = [];
     for (const id of Object.keys(map)) {
       const value = map[id];
@@ -345,45 +431,17 @@ window.__ja = {
   },
 
   async pickOption(id, optionText, opts) {
+    if (tabHidden()) return j({ ok: false, err: 'tab-hidden', id, hint: HIDDEN_HINT });
     const search = !opts || opts.search !== false;
     const box = findField(id);
     if (!box) return j({ ok: false, err: 'field-not-found', id });
 
-    const before = new Set(visibleMenus());
-    const trigger = box.querySelector(A.textInputSel) || box;
-    synthClick(trigger);
-
-    let menu = null;
-    let freshCount = 0;
-    for (let i = 0; i < 8; i++) {
-      await sleep(250);
-      const fresh = visibleMenus().filter((m) => !before.has(m) && m.isConnected);
-      freshCount = fresh.length;
-      if (fresh.length) { menu = fresh[0]; break; }
-    }
-    // 删掉了原型里的 `|| visibleMenus().pop()` 兜底：它会把常驻菜单当目标。
-    // 找不到就失败，好过选错菜单。
+    const { menu, freshCount } = await openMenuFor(box.querySelector(A.textInputSel) || box);
     if (!menu) return j({ ok: false, err: 'menu-not-open', id, hint: 'fallback-cdp' });
 
-    const searchBox = menu.querySelector('input:not([readonly])');
-    if (search && searchBox && optionText) {
-      setNativeValue(searchBox, optionText);
-      await sleep(400);
-    }
-    const items = menuItems(menu);
-    const target = matchItem(items, optionText);
-    if (!target) {
-      document.body.click();
-      return j({
-        ok: false, err: 'option-not-found', id, optionText,
-        menus: freshCount,
-        available: items.slice(0, 10).map((x) => x.textContent.trim().slice(0, 15)),
-      });
-    }
-    if (!target.isConnected) return j({ ok: false, err: 'item-detached', id, optionText });
+    const r = await chooseIn(menu, optionText, search);
+    if (!r.ok) return j({ ok: false, err: r.err, id, optionText, menus: freshCount, available: r.available });
 
-    synthClick(target);
-    await sleep(500);
     const value = readSelect(box);
     return j({ ok: norm(value) === norm(optionText) || value.indexOf(optionText) >= 0, id, value: trunc(value) });
   },
@@ -402,10 +460,25 @@ window.__ja = {
   //   也没有任何接受迹象。所以只读字段一律返回 ok:false + readonly-unverifiable，
   //   **绝不报成功** —— 一个看起来填好、实际提交为空的字段，比明确失败危险得多。
   async fillDate(id, ymd) {
+    if (tabHidden()) return j({ ok: false, err: 'tab-hidden', id, hint: HIDDEN_HINT });
     const box = findField(id);
     if (!box) return j({ ok: false, err: 'field-not-found', id });
     const type = typeOf(box);
     if (type !== 'date') return j({ ok: false, err: 'not-a-date-field', id, type });
+
+    // 选择式日期控件（month-range-select）必须先挡掉，而且要在**动手写之前**挡。
+    // 命名失败（2026-09-22 Moka 实测）：「毕业时间（月）」「英语证书获得时间」= 2 个下拉的
+    // 单月变体，「就读时间」= 4 个下拉的区间变体，两者都不含可写的文本框。
+    // 不挡的话 fillDate 会往那两个下拉内部的 input 上写字，然后报 display-not-updated ——
+    // 结论没错（没有谎报成功），但**控件已经被污染**，而且报错说的是"改走日历选择"，
+    // 没告诉调用方真正该用的是 fillMonthRange。
+    if (A.rangeSel && box.querySelector(A.rangeSel)) {
+      return j({
+        ok: false, err: 'select-based-date', id,
+        hint: '这个日期字段是选择式控件（month-range-select），不含文本框。用 fillMonthRange 填：'
+            + '单月字段（2 个下拉）传 to=空串，区间字段（4 个下拉）传起止。',
+      });
+    }
 
     // 接受 'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD'。
     // 只有年份时按用户规则补 01，但**补了什么必须报出来**（assumed），
@@ -447,9 +520,15 @@ window.__ja = {
     }
 
     // ★ 验证读哪，是这里最容易撒谎的地方。
-    // 实测 Moka「就读时间」：input.value 写进去了、6 个里 5 个是空的，
-    // 而应用真实的值渲染在 sd-Input-display-value 里。只用 input 回读 → 报"填上了"，
-    // 实际应用状态是空的。所以：字段内存在 display 元素时，一律以它为准。
+    // 实测 Moka：input.value 写进去了、重渲染后还在，而应用真实的值渲染在
+    // sd-Input-display-value 里。只用 input 回读 → 报"填上了"，实际应用状态是空的。
+    // 所以：字段内存在 display 元素时，一律以它为准。
+    //
+    // 【2026-09-22 更正】「就读时间」曾被当作这条结论的样本，但那是个误判 ——
+    // 它是**选择式月区间**（month-range-select + 4 个下拉），压根没有文本框，
+    // 值本来就只存在于 display 里。那类字段走 fillMonthRange，**不要用 fillDate**：
+    // fillDate 会往那 4 个下拉内部的 input 写值，在报 display-not-updated 的同时
+    // 已经把控件状态污染了（值写进去了但应用不认，可能冲掉原有选择）。
     const dispEls = A.valueSel ? [...box.querySelectorAll(A.valueSel)] : [];
     if (dispEls.length) {
       const seen = dispEls.map((e) => e.textContent.trim()).filter(Boolean).join(' ');
@@ -470,9 +549,112 @@ window.__ja = {
     return j(out);
   },
 
+  // 选择式月区间（R4 的第三种形态，2026-09-22 由首次真实投递触发）。
+  //
+  // 命名失败：Moka 的「就读时间」是 month-range-select —— 起始年/月 + 结束年/月 共 4 个下拉，
+  // **一个文本框都没有**，而它是必填。填不上就得人工点 4 次下拉；三段教育就是 12 次。
+  // 现有两个方法都盖不住：fillDate 只认 input（在那 4 个下拉内部的 input 上写值等于污染控件），
+  // pickOption 一个字段只点一个菜单。所以单列一个方法，而不是给 fillDate 加分支 ——
+  // 它的契约是"一个日期"，塞进区间会让 `ok` 的含义变模糊。
+  //
+  // from / to 接受 'YYYY' 或 'YYYY-MM'；to 传空串/null 表示"至今"，只填起始两个下拉。
+  // 缺月份按用户规则补 01，补了什么在 assumed 里报出来（与 fillDate 同一口径：补的值不能冒充事实）。
+  async fillMonthRange(id, from, to) {
+    if (tabHidden()) return j({ ok: false, err: 'tab-hidden', id, hint: HIDDEN_HINT });
+    const box = findField(id);
+    if (!box) return j({ ok: false, err: 'field-not-found', id });
+    if (!A.rangeSel || !box.querySelector(A.rangeSel)) return j({ ok: false, err: 'not-a-month-range', id });
+
+    const ym = (s) => {
+      const m = /^(\d{4})(?:-(\d{1,2}))?$/.exec(String(s == null ? '' : s).trim());
+      if (!m) return null;
+      const assumed = [];
+      let mm = '01';
+      if (m[2]) {
+        const n = +m[2];
+        // ★ 月份越界要在这里拦住。放过去的话，值会一路走到下拉里匹配不到，
+        //   报的是 option-not-found（带 available 选项表），排查者会去怀疑站点改版，
+        //   而真正的原因通常是档案里的日期写错了（如区间解析把 2023-13 写进数据）。
+        if (n < 1 || n > 12) return null;
+        mm = String(n).padStart(2, '0');
+      } else assumed.push('month');
+      return { y: m[1], m: mm, assumed };
+    };
+
+    const a = ym(from);
+    if (!a) return j({ ok: false, err: 'bad-ym', id, from });
+    const openEnd = to === undefined || to === null || to === '';
+    const b = openEnd ? null : ym(to);
+    if (!openEnd && !b) return j({ ok: false, err: 'bad-ym', id, to });
+
+    const order = openEnd ? [[a.y, a.m]] : [[a.y, a.m], [b.y, b.m]];
+    const need = order.length * 2;
+    const sels = [...box.querySelectorAll(A.rangeSelectSel || A.textInputSel)].filter((e) => e.offsetHeight > 0);
+    if (sels.length < need) {
+      return j({ ok: false, err: 'range-selects-missing', id, selects: sels.length, need });
+    }
+
+    const picks = [];
+    for (let i = 0; i < order.length; i++) {
+      for (let k = 0; k < 2; k++) {
+        const want = order[i][k];
+        // 月份的显示形态不一定补零：实测 Moka 渲染 "9"，而 ISO 写法是 "09"。
+        // 两种写法都试，最终以页面给的文本为准（picks 里回的是实际选中项的文本）。
+        const texts = k === 0 ? [want] : (String(+want) === want ? [want] : [want, String(+want)]);
+        let hit = null;
+        let last = null;
+        for (const text of texts) {
+          // 元素引用不跨 sleep 复用（§六 内部规约）：每步重新定位字段与下拉。
+          // 顺带每次重验下拉数量 —— 重渲染把控件换掉是这类组件最常见的失效方式。
+          const cur = findField(id) || box;
+          const list = [...cur.querySelectorAll(A.rangeSelectSel || A.textInputSel)].filter((e) => e.offsetHeight > 0);
+          if (list.length < need) return j({ ok: false, err: 'range-selects-missing', id, selects: list.length, need });
+          const sel = list[i * 2 + k];
+          if (!sel || !sel.isConnected) return j({ ok: false, err: 'select-detached', id, step: want, picked: picks });
+          const { menu } = await openMenuFor(sel);
+          if (!menu) return j({ ok: false, err: 'menu-not-open', id, step: want, picked: picks });
+          last = await chooseIn(menu, text, true);
+          if (last.ok) { hit = last; break; }
+        }
+        if (!hit) {
+          return j({ ok: false, err: last.err, id, step: want, picked: picks, available: last.available });
+        }
+        picks.push(hit.text);
+      }
+    }
+    await sleep(300);
+
+    const out = { id, from: a.y + '-' + a.m, to: b ? b.y + '-' + b.m : null, picks };
+    const assumed = a.assumed.map((x) => 'from.' + x).concat(b ? b.assumed.map((x) => 'to.' + x) : []);
+    if (assumed.length) out.assumed = assumed;
+
+    // 验证：与 fillDate 同一条规则 —— 字段内存在 display 元素时一律以它为准。
+    const finalBox = findField(id) || box;
+    const disp = A.valueSel ? [...finalBox.querySelectorAll(A.valueSel)].map((e) => e.textContent.trim()) : [];
+    const want = openEnd ? [a.y, a.m] : [a.y, a.m, b.y, b.m];
+    if (disp.length) {
+      out.verifiedBy = 'display';
+      out.displayAfter = trunc(disp.filter(Boolean).join(' '));
+      out.ok = want.every((w, i) => {
+        const got = norm(disp[i] || '');
+        return got !== '' && (got === norm(w) || got === norm(String(+w)));
+      });
+      if (!out.ok) {
+        out.err = 'display-not-updated';
+        out.hint = '下拉点过了但应用渲染的值没变，请在页面上确认这一格';
+      }
+      return j(out);
+    }
+    out.verifiedBy = 'picks';
+    out.ok = picks.length === need;
+    if (!out.ok) out.err = 'not-stuck';
+    return j(out);
+  },
+
   // 在指定区块内加一行。按钮文本各站点高度雷同，所以不按文本选站点，
   // 而是"区块内定候选 → 取文本最短者 → 用区块计数 +1 验证效果"。
   async addRow(kind) {
+    if (tabHidden()) return j({ ok: false, err: 'tab-hidden', kind, hint: HIDDEN_HINT });
     if (!A.blockSections) return j({ ok: false, err: 'no-block-sections', kind });
     const sec = sectionByKind(kind);
     if (!sec) return j({ ok: false, err: 'section-not-found', kind });
