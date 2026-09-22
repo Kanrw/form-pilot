@@ -232,10 +232,15 @@ __ja.fillDate(id, 'YYYY-MM-DD')                → {ok,wrote,after,unfilledInput
 - `type` 枚举：`text | textarea | file | select | date | cascade | choice | unknown`。
   `fillTexts` 只处理 `text`/`textarea`，其余跳过并在 `failed[].err` 里归类为 `not-text:<type>`。
 - **日期字段多为"年/月/日"若干文本框，不是下拉 —— 先试直填，别默认走 `pickOption`。**
-  实测 Moka：`就读时间` 是 4 个 input（年/月/年/月 的区间），`毕业时间（月）` 是 2 个（年/月），
-  都可直填。缺月份的按用户规则用 `01`（`2022` → `2022-01`）。
+  缺月份的按用户规则用 `01`（`2022` → `2022-01`），补了什么在 `assumed` 里报出。
   区间字段只填起始、结束留空即"至今"，未填个数在 `unfilledInputs` 里报出。
-  **只读日期控件（如 Moka `出生日期`）程序化写入无法验证 → 一律 `readonly-unverifiable` 转人工**，见 `fillDate` 注释。
+- **日期字段最容易撒谎的一点：值可能根本不在 `<input>` 上。**
+  实测 Moka `就读时间`：`input.value` 写进去了、重渲染后还在，但应用把真实值渲染在
+  `sd-Input-display-value` 里且**那几个是空的** —— 看起来填好了，提交时是空的。
+  所以规则是：**字段内存在 display 元素时，一律以 display 为准**（`verifiedBy:'display'`），
+  它为空的场景返回 `display-not-updated`；没有 display 元素才回退到 input 比对（`verifiedBy:'input'`）。
+  不要用 `readonly:false` 反推"能直填" —— 这个结论我犯过一次，见 04 审查的教训。
+- **只读日期控件（如 Moka `出生日期`）一律 `readonly-unverifiable` 转人工**，见 `fillDate` 注释。
 - `phase` 枚举：`locate | fill | verify`。
 - **文件上传不经引擎**：JS 拿不到 File 对象，走桥的 `upload` 动作，引擎不提供上传接口。
 - `scan`/`readAll` **没有分页参数**（§2.4 已删）。返回值超限再说。
@@ -279,8 +284,17 @@ main>>推荐码           main>>是否内推        main>>上传简历
 Plan 01 R2 原本只对 `main` 前缀消歧，实测发现非重复区块之间也可能撞名，故 `main` 分支同样加 `#n`。
 **已验收**：Moka 页 scan → `total 49 / unique 49 / duplicate 0`。
 
+**已知的结构变更源（都会让 ID 漂移，必须重新 scan）**：
+
+| 变更源 | 实测影响 |
+| --- | --- |
+| 站内"添加一行" | 未验收（`addRow` 还没在真实页跑过） |
+| **上传简历触发站内解析** | **已实测（2026-09-22 Moka）**：教育经历 1 → 3 行、项目经验 1 → 3 行，字段总数 49 → 56 → 68；解析器还会**覆盖已填字段**，清掉了我先填的 `学校名称`／`研究方向`／`是否有项目经验` |
+
+> **硬规则：上传简历是整个流程的第一步。** 等解析跑完、结构稳定后再 scan、再填。
+> 反过来做，等于把自己刚填的内容交给解析器覆盖。解析是异步的，实测 12 秒后仍在变动。
+
 **未验收**：`addRow` 之后的 ID 稳定性（加一行 → 出现 `edu[1]>>` 且 `edu[0]>>` 不变）。
-需要一次受控写，属 Phase 2。触发条件未出现前不宣称它成立。
 
 ## 八、故障降级链
 

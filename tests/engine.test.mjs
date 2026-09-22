@@ -25,9 +25,9 @@ test('detect() 按 DOM 签名认站点', () => {
 
 test('scan() 字段数与 ID 单射', () => {
   const s = JSON.parse(moka().scan());
-  // ★ fixture 里 9 个字段 + 4 个 apply-fields-* wrapper。
-  //   fieldSel 一旦退回 `[class*=apply-field]`（少尾横线）这里立刻变成 13。
-  assert.equal(s.total, 9, 'fieldSel 必须排除 apply-fields-* wrapper');
+  // ★ fixture 里 10 个字段 + 4 个 apply-fields-* wrapper。
+  //   fieldSel 一旦退回 `[class*=apply-field]`（少尾横线）这里立刻变成 14。
+  assert.equal(s.total, 10, 'fieldSel 必须排除 apply-fields-* wrapper');
   // ★ ID 是 fillTexts(map) 的 key，重名即静默填错字段
   assert.equal(s.total, new Set(s.fields.map((f) => f.id)).size, 'ID 必须单射');
 });
@@ -90,21 +90,31 @@ test('findField() main 内重名落到不同 input', async () => {
   assert.equal(a['main>>个人网站#2'].value, 'B 站');
 });
 
-test('fillDate() 年月直填：区间只填起始，结束留空即"至今"', async () => {
+test('fillDate() 值不在 input 上时不许报成功', async () => {
   const ja = moka();
   const r = JSON.parse(await ja.fillDate('edu[0]>>就读时间', '2022-01'));
+  // ★ 实测 Moka「就读时间」：input.value 写进去了（甚至重渲染后还在），
+  //   但应用把真实值渲染在 sd-Input-display-value 里 —— 那几个仍然是空的。
+  //   只看 input 回读就会报"填上了"，而提交时该字段是空的。
+  assert.equal(r.ok, false, 'input 粘住 ≠ 应用接受');
+  assert.equal(r.err, 'display-not-updated');
+  assert.equal(r.verifiedBy, 'display', '有 display 元素时必须以它为准');
+  assert.deepEqual(r.wrote, ['2022', '01'], '写入照做，只是不许声称成功');
+  assert.equal(r.unfilledInputs, 2, '4 个 input 的区间只填起始，结束留空 = 至今');
+});
+
+test('fillDate() 无 display 元素时走 input 验证并成功', async () => {
+  const ja = moka();
+  const r = JSON.parse(await ja.fillDate('main>>毕业时间（月）', '2026-06'));
   assert.equal(r.ok, true);
-  assert.deepEqual(r.wrote, ['2022', '01']);
-  assert.deepEqual(r.after, ['2022', '01'], '值必须真落进 input');
-  // ★ 4 个 input 是"年月年月"的区间，结束留空表示在读至今
-  assert.equal(r.unfilledInputs, 2, '区间字段只填起始，结束留空');
+  assert.equal(r.verifiedBy, 'input');
+  assert.deepEqual(r.after, ['2026', '06'], '值必须真落进 input');
 });
 
 test('fillDate() 只有年份时补 01，且把假设报出来', async () => {
   const ja = moka();
-  const r = JSON.parse(await ja.fillDate('edu[1]>>就读时间', '2018'));
-  assert.equal(r.ok, true);
-  assert.deepEqual(r.wrote, ['2018', '01'], '缺月份按用户规则补 01');
+  const r = JSON.parse(await ja.fillDate('main>>毕业时间（月）', '2026'));
+  assert.deepEqual(r.wrote, ['2026', '01'], '缺月份按用户规则补 01');
   // ★ 静默默认会把"我只有年份"这个数据缺口掩盖掉，必须显式上报
   assert.deepEqual(r.assumed, ['month', 'day']);
 });

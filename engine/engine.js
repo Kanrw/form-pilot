@@ -432,7 +432,7 @@ window.__ja = {
     }
     const targets = ins.slice(0, plan.length);
     for (let i = 0; i < targets.length; i++) setNativeValue(targets[i], plan[i]);
-    await sleep(400);
+    await sleep(600);
 
     const after = targets.map((i) => i.value);
     const readonly = ins.filter((i) => i.readOnly).length;
@@ -445,6 +445,26 @@ window.__ja = {
       out.hint = '只读控件的程序化写入无法证明被应用接受，请在页面上人工确认或改用日历选择';
       return j(out);
     }
+
+    // ★ 验证读哪，是这里最容易撒谎的地方。
+    // 实测 Moka「就读时间」：input.value 写进去了、6 个里 5 个是空的，
+    // 而应用真实的值渲染在 sd-Input-display-value 里。只用 input 回读 → 报"填上了"，
+    // 实际应用状态是空的。所以：字段内存在 display 元素时，一律以它为准。
+    const dispEls = A.valueSel ? [...box.querySelectorAll(A.valueSel)] : [];
+    if (dispEls.length) {
+      const seen = dispEls.map((e) => e.textContent.trim()).filter(Boolean).join(' ');
+      out.verifiedBy = 'display';
+      out.displayAfter = trunc(seen);
+      const hit = seen.length > 0
+        && plan.every((p) => seen.indexOf(p) >= 0 || seen.indexOf(String(+p)) >= 0);
+      out.ok = hit;
+      if (!hit) {
+        out.err = 'display-not-updated';
+        out.hint = 'input 写进去了但应用渲染的显示值没变 —— 这个组件的值不在 input 上，改走日历选择';
+      }
+      return j(out);
+    }
+    out.verifiedBy = 'input';
     out.ok = after.every((v, i) => v === plan[i]);
     if (!out.ok) out.err = 'not-stuck';
     return j(out);
