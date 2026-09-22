@@ -1,3 +1,9 @@
+# ── 隐私边界：以下任何一项被提交即等于泄露 ──────────────────
+# private/ 放真实个人信息（档案、证件照、附件副本）。
+# 命名刻意叫 private 而不是 data：本机 ~/Documents/FindAJob/resume/data/ 是
+# **被提交**的资产目录，同名反义，容易误判。模板见 docs/profile-template.md。
+private/
+
 .DS_Store
 node_modules/
 tests/fixtures/raw/

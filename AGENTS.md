@@ -12,6 +12,20 @@
 - 生态位：Simplify 式 autofill（快但笨）与 Skyvern/browser-use 式 agent（聪明但贵）之间
 - 不做：批量投递、绕过验证、替用户提交、替用户猜测无来源字段
 
+**隐私边界（硬规则，不可放松）**
+
+本项目目标是公开分发，所以个人数据与项目资产必须物理隔离：
+
+- 真实个人信息只放 `private/`（已在 `.gitignore`）。**不要放进 `data/`** ——
+  本机 `~/Documents/FindAJob/resume/data/` 是**被提交**的资产目录，同名反义。
+- 档案字段清单与三类字段的处理约定见 `docs/profile-template.md`。
+- **推送前必须验证**：`git ls-files | grep -E '^private/'` 输出为空。
+  把 profile 内容或附件搬进 `tests/fixtures/`、`docs/`、`CHANGELOG` 同样违规。
+- 身份证号、银行卡号、密码、验证码属**永不自动填**：引擎不提供也不接受这类值，
+  一律进"待你手动"清单。这条不因"档案里已经写了"而放宽。
+- 引擎**不读** `private/`。它只能通过 `fillTexts(map)` 收到"某字段填某值"，
+  而 `字段 → 值` 的映射由用户在对话里确认（三道闸门的第一道）。
+
 ## 二、工作纪律（stop-that-shit · 本项目适用条款）
 
 > 来源：用户级 skill `stop-that-shit`（lennney/stop-that-shit，MIT）。
