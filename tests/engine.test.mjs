@@ -250,3 +250,60 @@ test('标签页在后台时立即报错，不进入无限等待', async () => {
   assert.equal(c.failed.length, 2, '形状不变：每个字段各报一条');
   assert.deepEqual(c.retried, []);
 });
+
+// ── 飞书（feishu）｜2026-09-22 首次适配 ─────────────────────
+// 结构事实来自真实申请页的只读探测（scripts/probe.mjs），此处用合成 DOM 固化：
+//   盒子 = atsx-form-item（完整 token）；类型写在内部组件类名上；
+//   <label> 是干净的字段名事实源（[class*=fieldName] 会混入已填值）。
+
+const FEISHU_HTML = `<div>
+  <div class="atsx-form-item">
+    <label>姓名</label>
+    <div class="atsx-form-item-control"><input type="text" class="atsx-input atsx-input-lg"></div>
+  </div>
+  <div class="atsx-form-item">
+    <label>政治面貌</label>
+    <div class="atsx-form-item-control">
+      <div class="atsx-select atsx-select-lg">
+        <div class="atsx-select-selection atsx-select-selection--single">
+          <div class="atsx-select-search atsx-select-search--inline">
+            <input type="text" class="atsx-select-search__field">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="atsx-form-item">
+    <label>起止时间</label>
+    <div class="atsx-form-item-control">
+      <span class="atsx-date-picker atsx-date-picker-period-month">
+        <input type="text" class="atsx-date-picker-period-hidden-input">
+      </span>
+    </div>
+  </div>
+</div>`;
+
+test('detect() 认飞书签名（atsx-form-item 完整词）', () => {
+  assert.equal(loadEngine(makeDom(FEISHU_HTML), { adapters: false }).detect(), 'feishu');
+});
+
+test('★ 子树判据：类型在组件上、不在盒子类名上时仍能判对（飞书 8 个下拉静默错挡）', () => {
+  // 必须配 feishu 适配器：generic 的就近容器会把下拉的盒子定位到
+  // atsx-select-search 那层，测不到真实形态。typeMap 为空 → 走 heuristicType。
+  const s = JSON.parse(loadEngine(makeDom(FEISHU_HTML), { adapter: 'feishu' }).scan());
+  const byId = Object.fromEntries(s.fields.map((f) => [f.id, f]));
+  // 飞书形态：盒子 class 只有 atsx-form-item，下拉 input 是 atsx-select-search__field
+  // 且**不是 readonly** —— cls 判据与 readonly 判据全部落空。修复前这两个都判成
+  // text，fillTexts 往下拉输入框写值静默无效（与 Moka bool_info 同类、根因不同）。
+  // 未声明 blockSections → 降级 ID 形态（AGENTS.md §七）：裸 <label>，无 main>> 前缀。
+  assert.equal(byId['政治面貌'].type, 'select', 'select-search 必须被子树判据抓到');
+  assert.equal(byId['起止时间'].type, 'date', 'date-picker 必须被子树判据抓到');
+  assert.equal(byId['姓名'].type, 'text', '纯 input 不受子树判据误伤');
+});
+
+test('feishu 适配器：~= 完整词匹配选盒子，label 作字段名，重复靠 #n 消歧', () => {
+  const s = JSON.parse(loadEngine(makeDom(FEISHU_HTML), { adapter: 'feishu' }).scan());
+  assert.equal(s.total, 3, '[class~=] 不许误中 form-item-control/-children/-label');
+  assert.equal(s.total, new Set(s.fields.map((f) => f.id)).size, 'ID 单射');
+  assert.ok(s.fields.every((f) => f.label), '每个盒子都取到 label');
+});

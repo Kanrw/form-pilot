@@ -72,6 +72,33 @@ window.__jaAdapters = window.__jaAdapters || {
     ],
   },
 
+  // ── 飞书招聘（*.jobs.feishu.cn）｜只读探测 2026-09-22 ─────
+  // 探测来源：记忆科技（深圳）校招申请页，scripts/probe.mjs + 结构核对，未写入。
+  // 组件库 atsx-*。与 Moka 的根本差异：类型写在**内部组件**类名上
+  // （atsx-select-search / atsx-date-picker），字段盒子只有 atsx-form-item 一个 token ——
+  // 类型判定靠引擎的子树判据（engine.js heuristicType 2026-09-22 新增），typeMap 无从写起。
+  feishu: {
+    name: 'feishu',
+    verified: '2026-09-22',
+    source: 'https://varp4lp3dbc.jobs.feishu.cn/708509/resume/<resumeId>/apply',
+
+    // ★ ~= 是按空白分词的完整词匹配。裸 [class*=atsx-form-item] 会同时命中
+    //   form-item-label / -control / -children / -required（实测 156 个节点 → 真盒子只有 28 个）。
+    fieldSel: '[class~="atsx-form-item"]',
+    labelSel: 'label',
+    // 字段名有两套：<label>（干净，26 个）与 [class*=fieldName]（textContent 会混入已填值，
+    // 如"意向城市东莞"—— 不可作 label 事实源）。
+    // 菜单三件套未验证（打开菜单属页面状态变更，留给首次受控写时校准并回填）：
+    menuSel: null,
+    itemSel: null,
+    valueSel: null,
+
+    // 分区容器实测有 title（申请信息 / 附件简历 / …），但区块标题元素与 kind 的
+    // 对应关系尚未核对 —— 首版不声明 blockSections，重复 label（起止时间×2）靠 main>>#n 消歧。
+    blockSectionSel: '[class~="createFormSection-container"]',
+    blockGroupSel: null,
+  },
+
   // ── 北森（*.zhiye.com）｜仅文档来源，未实测 ───────────────
   // 故意不声明 blockSections / typeMap：没有真实探测就没有依据。
   // 已知（来自 v1 指南，未实测）：单选是 div.phoenix-radio；多选菜单选完要点"确定"。

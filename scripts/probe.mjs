@@ -206,7 +206,7 @@ async function main() {
   const code = `(function(){
     window.__PROBE_TEXT = ${wantText ? 'true' : 'false'};
     ${as ? `window.__PROBE_AS = ${JSON.stringify(as)};` : ''}
-    return (${PROBE_CODE})();
+    return (${PROBE_CODE});
   })()`;
 
   let payload;

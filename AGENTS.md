@@ -234,13 +234,24 @@
 
 ## 五、适配器注册表
 
-文件：`engine/adapters.js` —— **已落盘**（IIFE 挂 `window.__jaAdapters`，幂等）。三个注册项：
+文件：`engine/adapters.js` —— **已落盘**（IIFE 挂 `window.__jaAdapters`，幂等）。四个注册项：
 
 | 适配器 | verified | source | fieldSel |
 | --- | --- | --- | --- |
 | `moka` | `2026-09-22` | CATL 校招申请页（只读探测） | `[class*=apply-field-]` |
 | `beisen` | `null` | `docs-only` | `.form-item` |
+| `feishu` | `2026-09-22` | 记忆科技校招申请页（只读探测，L3 未跑） | `[class~="atsx-form-item"]` |
 | `generic` | `null` | `builtin` | 空（走引擎默认：input 就近容器） |
+
+**feishu 与 moka 的根本差异（2026-09-22 实测）**：类型写在**内部组件**类名上
+（`atsx-select-search` / `atsx-date-picker`），字段盒子只有 `atsx-form-item` 一个 token，
+且下拉 input 非 readonly —— 启发式的旧两条判据全部落空，typeMap 无从写起（盒子上没有类型 token）。
+**引擎为此新增了子树判据**（`heuristicType` 在 cls/readonly 之前查组件类名），
+同轮顺带覆盖了 Moka `bool_info` 那类失败。选择器必须用 `~=`（完整词匹配）：
+裸 `[class*=atsx-form-item]` 实测命中 156 个节点，真盒子只有 28 个。
+字段名事实源是 `<label>`；`[class*=fieldName]` 的 textContent 会混入已填值（"意向城市东莞"）。
+「意向城市」「手机号码」是**只读展示**（值来自账号资料，盒内无 input），scan 报 `unknown` 属正确语义。
+`起止时间` 是 `atsx-date-picker-period-month` 月区间 —— `fillMonthRange` 的第二个站点。
 
 **moka 的选择器（实测）**：
 
