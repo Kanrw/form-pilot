@@ -239,7 +239,7 @@
 | 适配器 | verified | source | fieldSel |
 | --- | --- | --- | --- |
 | `moka` | `2026-09-22` | CATL 校招申请页（只读探测） | `[class*=apply-field-]` |
-| `beisen` | `null` | `docs-only` | `.form-item` |
+| `beisen` | `2026-09-22` | 粤芯半导体校招申请页（L2+L3 部分，选择类控件未攻克） | `.form-item` |
 | `feishu` | `2026-09-22` | 记忆科技校招申请页（只读探测，L3 未跑） | `[class~="atsx-form-item"]` |
 | `generic` | `null` | `builtin` | 空（走引擎默认：input 就近容器） |
 
@@ -293,11 +293,26 @@ blockSections    edu 教育背景 / intern 实习经历 / proj 项目经验 / sc
    **修法在引擎侧**（`visibleMenus()` 做"嵌套只留最外层"），**不要删适配器里的
    `sd-Menu-container`** —— 别的下拉形态可能只渲染后者，删了会静默少一类菜单。
 
-**北森**（来自 v1 指南，未实测）：单选是 `div.phoenix-radio`；多选样式 `.list-item-container`，
-选完要点面板内"确定"（`.phoenix-button`）才生效；菜单 portal 在 body 底部的
-`.common-unmodeled-layer`（取高度>100 的可见者）。
-**刻意不声明 `blockSections` / `typeMap`——没有真实探测就没有依据。**
-这两项属 R3，按 §2.4 推迟到首次实际使用。
+**北森实战记录（2026-09-22，粤芯 cansemitech.zhiye.com，L3 部分完成）**：
+
+- **已攻克**：div.phoenix-radio 单选（R3 setChoice，`--checked` 验证）；普通 `.phoenix-selectList`
+  下拉结构确认；`.form-item` + `label` 字段盒（与 v1 指南猜的一致）；「添加项目经历」等
+  加行按钮是 `sc-jeraig` 叶子 span，**合成 pointer 五件套点叶子才生效**（WebBridge 真实 click
+  会被解析到外层容器，点不动按钮）；fillTexts 批填 9/9 全中。
+- **未攻克（本会话约 25 轮调用）**：**editable select（`phoenix-select--editable`）全部免疫**，
+  覆盖日期下拉（开始/结束时间）与区域级联（籍贯/城市）。实测无效的通道：
+  ① native setter + input 事件；② WebBridge 真实 click + key_type；③ CDP `Input.insertText`
+  （focus 保持但值不落）；④ CDP `Input.dispatchMouseEvent` 真实坐标按下/抬起；⑤ 合成
+  pointer/mouse 五件套（点 input、点 `.phoenix-select__switchArrow` 都不开菜单）。
+  区域级联面板（`common-unmodeled-layer` + `area-text-label`）能开但点击只是导航，
+  勾选控件是行内 SVG 图标（`area-icon-RadioUnchecked`），同样点不动。
+  **结论**：北森选择类字段现阶段一律 manual，不要在会话里反复重试同类通道；
+  下一步值得试的只有 `getEventListeners()` 查真实绑定位置 / 组件 state 直调，见 §2.4 R3 余项。
+- **站内简历解析器是最大的填充者**：上传 PDF 后自动带入约 60% 字段（姓名/性别/手机/教育三段/
+  项目一/技能名与掌握程度/证书区骨架）。引擎的增量价值在解析器不覆盖的部分：
+  专业名称 ×3、实习区、加行后的 3 个项目组、全部技能描述——fillTexts 一次调用全中。
+  **每个站点的 L3 第一步都是先传简历、等解析、再 rescan**（本页 53→68 个字段）。
+- **教育段的港大交换（开始 2024-01）结束时间待使用者确认**，档案无此值，未瞎填。
 
 ## 六、引擎 API
 
