@@ -30,6 +30,11 @@
   把 profile 内容或附件搬进 `tests/fixtures/`、`docs/`、`CHANGELOG` 同样违规。
 - 身份证号、银行卡号、密码、验证码属**永不自动填**：引擎不提供也不接受这类值，
   一律进"待你手动"清单。这条不因"档案里已经写了"而放宽。
+
+  > **待决（2026-09-22）**：首次真实投递后，使用者提出"身份证号码你没帮我填"。
+  > 这是**边界本身待他决定**，不是漏填。要放宽的正确做法是
+  > **改 `tools/profile.schema.mjs` 里 `basic.idNumber` 的 `autofill` 分类**（`never` → 其它档位），
+  > 走既有的三分类机制；**不是给引擎开口子**。在此之前引擎仍按 `never` 处理。
 - 引擎**不读** `private/`。它只能通过 `fillTexts(map)` 收到"某字段填某值"，
   而 `字段 → 值` 的映射由用户在对话里确认（三道闸门的第一道）。
 
@@ -158,6 +163,24 @@
   并把 png 落到磁盘。**这是零安装做"真实渲染核对"的路子** —— 不用装浏览器自动化工具，
   直接开页 + `evaluate` 取 `getBoundingClientRect()` 就能核版式，`screenshot` 能拿到画面。
 - 固定 session 名约定：同一任务一个 session，如 `form-v01`、`adapter-research`
+- **写 payload 一律用 node 生成文件 + `--data-binary`，不要在 shell 里内联 JSON**（2026-09-22 实测）。
+  两个坑：① 内联 JSON 里的 `\n` 会被 shell 吃掉，正则直接变成 `Invalid regular expression: missing /`；
+  ② 中文与引号在多层转义下极易写坏。模板：
+  ```bash
+  node -e 'const fs=require("fs");fs.writeFileSync("/tmp/p.json",
+    JSON.stringify({action:"evaluate",args:{code:fs.readFileSync("/tmp/code.js","utf8")},session:"form-v01"}))'
+  curl -s -X POST http://127.0.0.1:10086/command -H 'Content-Type: application/json' --data-binary @/tmp/p.json
+  ```
+  代码写进 `code.js`，Node 负责转义 —— 正则与多行字符串都能原样送过去。
+- **动作参数可以空参调用反推**：`{"action":"upload","args":{}}` 会回
+  `upload: selector is required`，补上再调会回下一层缺什么。无需文档即可拿到参数表。
+  已探到的：`upload` = `{selector, files:[绝对路径]}`；`find_tab` 需要 `{url}`（传 tabId 会报
+  `find_tab: url is required`，url 写前缀即可匹配）。
+- **session → tab 绑定比想象中更易失**：实测一次会话里当前 tab 连续被关掉两次，
+  报错形如 `current tab <id> was closed; session still has tabs [...] — call list_tabs to re-target`。
+  恢复办法：`list_tabs` 看哪个 tab 还指向申请页 → `find_tab {url: 前缀}` 重新绑定。
+  **不要把 tabs 列表传给 evaluate**，evaluate 只认重新绑定后的当前 tab。
+- macOS 上**没有 `timeout` 命令**，用 `curl --max-time <秒>`。
 
 **桥接状态是当场读数，不是本文件的常驻事实。** 2026-09-22 发生过两次状态反转（10:11 daemon 被终止、
 11:35 恢复）——**每次使用前必须重新 `status`，不得引用任何历史值**。
@@ -169,6 +192,37 @@
 **status 在 running 态的完整字段**（2026-09-22 实测）：
 `extension_connected, extension_id, extension_version, port, running, skills[], update_available{}, uptime_seconds, version`。
 `running:false`（缺 daemon）与 `extension_connected:false`（缺浏览器/扩展）是两种故障、两种修法。
+
+### ★ 目标标签页必须在前台（2026-09-22 实测）
+
+另外，**标签页内容本身也会变**（2026-09-22 实测）：一次会话中途，session 绑定的那个标签页
+被切到了别的站点，`apply-field-` 计数归 0、引擎丢失、适配器回落到 `generic`。
+所以每个写操作前，除 `document.hidden` 之外再加一句 `location.href` 仍在申请页上；
+`inject.mjs` 回的 `adapter` 从 `moka` 变成 `generic` 就是这个信号。
+
+**这是引擎的硬前提，不是建议。** Chrome 对后台标签页节流定时器，而引擎**每个**异步方法都靠
+`sleep`（`setTimeout`）驱动 —— 于是 `fillTexts` / `pickOption` / `fillDate` / `fillMonthRange` /
+`addRow` 全部变成**无限等待：不报错、不返回、也不超时**。这是最坏的失败形态。
+
+实测证据（同一次会话，同一标签页）：
+
+| 操作 | 后台（`hidden: true`） | 前台（`visible`） |
+| --- | --- | --- |
+| `await new Promise(r => setTimeout(r, 1500))` | **30 秒未触发** | 正常 |
+| 同步 `evaluate`（如 `pickOption` 走 `field-not-found`） | 秒回 | 秒回 |
+
+同步路径不受影响，所以"桥是通的、页面也在"会误导排查方向 —— **先查 `document.hidden`**。
+
+引擎已在每个异步方法入口加了前台守卫：命中返回 `err:'tab-hidden'`（`fillTexts` 保持
+`{ok,failed,retried}` 形状，`ok: 0` 且每个字段各报一条）。**局限**：挡不住"填到一半被切到后台"。
+不要试图用"给 `sleep` 加超时"来兜底 —— 那个超时定时器同样不会触发。
+
+### 下拉触发器是"切换"语义（2026-09-22 实测）
+
+同一下拉**连点两次**，可见面板数 `0 → 1 → 0`：点击一个**已经打开**的触发器是把它**关掉**。
+结合另一条实测 —— `chooseIn` 失败后页面**会残留 1 个可见面板**（`body.click()` 关不掉它）——
+就有：一次失败留下残留菜单 → 下一次点同一触发器把它关掉 → `openMenuFor` 永远看不到新菜单 →
+报 `menu-not-open`，而页面其实是好的。**这才是 `closeMenus()` 存在的理由**，别删。
 
 ## 五、适配器注册表
 
@@ -190,6 +244,8 @@ itemSel          [class*=sd-Menu-content-item]
 valueSel         [class*=sd-Input-display-value]
 blockSectionSel  [class*=apply-block-]     区块
 blockGroupSel    [class*=apply-fields-]    行分组（行索引来源）
+rangeSel         [class*=month-range-select]          选择式月区间容器
+rangeSelectSel   [class*=sd-Select-container]         区间内 4 个下拉（起始年/月、结束年/月）
 addText          '添加'
 typeMap          string_info→text / select_info→select / bool_info→select /
                  Select→select / multi_select_info→select / day_info→date /
@@ -200,7 +256,7 @@ blockSections    edu 教育背景 / intern 实习经历 / proj 项目经验 / sc
                  patent 个人专利/发明 / contest 竞赛经历 / skill 技能/爱好
 ```
 
-**三条实测校正（2026-09-22，别再退回）**：
+**四条实测校正（2026-09-22，别再退回）**：
 
 1. **`fieldSel` 的尾横线**。裸 `[class*=apply-field]` 会同时命中 16 个复数行分组容器
    `apply-fields-*`，把 wrapper 当字段（实测真字段 49 个 → 误报 65 个）。
@@ -211,6 +267,12 @@ blockSections    edu 教育背景 / intern 实习经历 / proj 项目经验 / sc
 3. **加行按钮的文本是"添加"两个字，页面上 6 个按钮全叫这个**。规划里写的
    `addRowText: '添加教育经历'` 不存在于 DOM。按文本匹配必然选错，只能区块内定位；
    `addRow` 用"区块内定候选 → 取文本最短者 → 行分组计数 +1 验证"（见 §六 内部方法表）。
+4. **`menuSel` 的两个选择器是父子关系，不是并列关系。** `[class*=sd-Menu-container]` 命中的是
+   每个选项**外层容器**，而它就长在 `[class*=sd-Select-menu]` 面板内部 —— 点开「民族」一个下拉，
+   `visibleMenus()` 返回 **59** 个元素（1 个面板 + 58 个单项容器），不是 1 个。
+   表征：`pickOption` 失败报告里的 `menus` 字段会报 59，让人以为同时弹了 59 个菜单。
+   **修法在引擎侧**（`visibleMenus()` 做"嵌套只留最外层"），**不要删适配器里的
+   `sd-Menu-container`** —— 别的下拉形态可能只渲染后者，删了会静默少一类菜单。
 
 **北森**（来自 v1 指南，未实测）：单选是 `div.phoenix-radio`；多选样式 `.list-item-container`，
 选完要点面板内"确定"（`.phoenix-button`）才生效；菜单 portal 在 body 底部的
@@ -237,17 +299,73 @@ __ja.pickOption(id, text, {search=true})       → {ok,value} | {ok:false,err:'f
                                                   |'menu-not-open'|'option-not-found'|'item-detached'}
 __ja.fillDate(id, 'YYYY-MM-DD')                → {ok,wrote,after,unfilledInputs} | {ok:false,err:
                                                   'field-not-found'|'not-a-date-field'|'bad-ymd'
+                                                  |'select-based-date'
                                                   |'no-date-inputs'|'input-count-mismatch'
                                                   |'readonly-unverifiable'|'not-stuck'}
+__ja.fillMonthRange(id, from, to)              → {ok,from,to,picks,assumed?,displayAfter?} | {ok:false,err:
+                                                  'field-not-found'|'not-a-month-range'|'bad-ym'
+                                                  |'range-selects-missing'|'select-detached'|'menu-not-open'
+                                                  |'option-not-found'|'item-detached'|'display-not-updated'}
 ⏸ __ja.probeEnv()      ⏸ __ja.snapshot()      ⏸ __ja.setPlan(ids)
 ⏸ __ja.setChoice(id,v) ⏸ __ja.diff()
 ```
 
+- **版本号仍是 `0.1.0`，即使接口已经涨过两次**（`fillDate`、`fillMonthRange`）。
+  D-5 的三处版本号里有两处（`skill/SKILL.md` frontmatter、`CHANGELOG.md`）是 Phase 3 的交付物，
+  目前还不存在。现在单方面把 `engine.js` 提到 `0.2.0`，只会造出一个"三处不一致、
+  却没人能跑 `--check` 断言"的状态 —— 版本对齐跟 Phase 3 一起做。
 - `type` 枚举：`text | textarea | file | select | date | cascade | choice | unknown`。
   `fillTexts` 只处理 `text`/`textarea`，其余跳过并在 `failed[].err` 里归类为 `not-text:<type>`。
 - **日期字段多为"年/月/日"若干文本框，不是下拉 —— 先试直填，别默认走 `pickOption`。**
   缺月份的按用户规则用 `01`（`2022` → `2022-01`），补了什么在 `assumed` 里报出。
   区间字段只填起始、结束留空即"至今"，未填个数在 `unfilledInputs` 里报出。
+- **但三种形态里有一种是选择式的，`fillDate` 盖不住：「月区间」用 `fillMonthRange`。**
+  实测 Moka 的 `date_info` 有**两个变体，同名组件不同下拉数**：
+  「就读时间」= 4 个下拉（起始年/月 + 结束年/月，**一个文本框都没有**）；
+  「毕业时间（月）」「英语证书获得时间」= **2 个下拉（年 + 月，单月不是区间）**。
+  容器类名都是 `month-range-select`。
+  `fillDate` 在这类字段上会先往下拉内部的 input 里写字、再报 `display-not-updated` ——
+  结论没错（没谎报成功），但控件已被污染。所以 `fillDate` 现在**动手之前**就识别并返回
+  `select-based-date`，并指名该用 `fillMonthRange`。
+  `fillMonthRange(id, from, to)`：**`to` 传空串 = 单月（只用 2 个下拉）/ 至今**，
+  传起止 = 区间（用 4 个下拉）；下拉数不足报 `range-selects-missing` 而不是硬填。
+  月份越界（如 `2023-13`）在这一层就 `bad-ym` 拦掉 —— 放过去会走到下拉里报
+  `option-not-found`，把排查引向站点改版，而真凶通常是档案里的日期写错了。
+- **「学校名称 / 专业名称」是联想输入（type-ahead），不是普通文本框（2026-09-22 实测）。**
+  这两个字段下面挂着候选面板。实测看到的内容：
+  学校 = `<示例大学>` / `<示例大学>继续教育学院` / `<示例大学>网络教育学院` / `广州城市理工学院`；
+  专业 = `<示例专业>` / `物理学` / `没有找到专业？添加专业全称`。
+  `fillTexts` 只把文本写进 input，**不从候选里确认**，后果有两层：
+  ① 值不被应用正式接受（看着填好了，应用不一定认）；
+  ② **候选面板一直挂在页面上** —— 实测使用者因此在操作表单时被反复干扰，
+  最后手动清空了 `学校名称` ×2 与 `专业名称` ×1（原话："下拉选项一直浮现"）。
+  **正确做法**：写完文本后从候选面板里**点选对应项**让应用确认，然后收起面板。
+  `pickOption` 的"点触发器 → 选菜单项"正好是这个动作，但**尚未在联想输入上验证过**。
+  注意候选值未必等于档案值（档案写 `<示例专业>（<示例班>）`，候选只有 `<示例专业>`），
+  这种不一致不要自作主张改数据，要走确认。
+- **级联（如「籍贯」）按 `01 §R4` 既定策略一律 manual**：三级面板 + 异步加载 + 重名地区
+  （全国几十个"朝阳区"），自动化收益低风险高。实测它表现为一个 readonly 输入框
+  （placeholder `请输入籍贯`），合成点击没能唤出面板 —— 更该留给使用者手动。
+- **★ 一个字段盒子里可能有多个 input，「取第一个」是错的（2026-09-22 实测，使用者发现）。**
+  Moka 的「手机号码」是 **国际区号（`+86`）+ 号码输入框** 的复合形态。`fillTexts` 写的是
+  `box.querySelector(A.textInputSel)` —— **盒子里第一个 input，也就是区号那一个**；
+  实测把整个 `<11位号码>` 灌进了 `+86` 的位置。
+  更糟的是 `valueOf` 读的也是第一个 input，**写入与回读都指向同一个错的地方**，
+  于是 `fillTexts` 报 `ok: true`，**自检完全失效** —— 这是"两边错到一起"的失败，比明确报错危险。
+  修法方向：适配器给这类字段声明**角色选择器**（如 `numberInputSel`），按角色定位而不是按序号。
+  **未修之前不要往这类复合字段写完整值。**
+- **★ 日期字段的形态是站点级差异，必须靠适配器声明，引擎不要猜（2026-09-22 实测三种）**：
+
+  | 站点 · 字段 | 形态 |
+  | --- | --- |
+  | Moka「就读时间」「毕业时间（月）」「英语证书获得时间」 | **选择式月区间**：`month-range-select`，2 个下拉（单月）或 4 个（区间） |
+  | Moka「项目经验 起止时间」 | **年 / 月 / 日 各一个独立框**（区间 = 两组共 6 框） |
+  | 北森 | **一个框内完成年月日选择**（单个 picker） |
+
+  本次踩的坑：`scan()` 把「起止时间」报成 `type: 'text'`，我照着当文本框填了
+  `2021-09 -- 2024-06` —— 全错。
+  **判据：填日期前先看 DOM 里到底有几个框、是不是下拉，不要只看 `type` 字段。**
+  `type` 是启发式/类名映射推出来的，它说 `text` 不代表真的只有一个文本框。
 - **日期字段最容易撒谎的一点：值可能根本不在 `<input>` 上。**
   实测 Moka `就读时间`：`input.value` 写进去了、重渲染后还在，但应用把真实值渲染在
   `sd-Input-display-value` 里且**那几个是空的** —— 看起来填好了，提交时是空的。
@@ -262,7 +380,7 @@ __ja.fillDate(id, 'YYYY-MM-DD')                → {ok,wrote,after,unfilledInput
 **内部方法命名（固定，不许现编）**：
 `sleep / norm / trunc / j / setNativeValue / synthClick / fields / labelOf / heuristicType / typeOf /`
 `firstTitle / rowIndexOf / sectionOf / sectionByKind / groupCount / readSelect / valueOf /`
-`isRequired / entries / findField / visibleMenus / menuItems / matchItem`
+`isRequired / entries / findField / visibleMenus / menuItems / matchItem / closeMenus / openMenuFor / chooseIn`
 
 内部规约（不可违反）：
 - 元素引用不得跨 sleep 复用（stale 免疫）
@@ -303,10 +421,41 @@ Plan 01 R2 原本只对 `main` 前缀消歧，实测发现非重复区块之间�
 | 变更源 | 实测影响 |
 | --- | --- |
 | 站内"添加一行" | 未验收（`addRow` 还没在真实页跑过） |
-| **上传简历触发站内解析** | **已实测（2026-09-22 Moka）**：教育经历 1 → 3 行、项目经验 1 → 3 行，字段总数 49 → 56 → 68；解析器还会**覆盖已填字段**，清掉了我先填的 `学校名称`／`研究方向`／`是否有项目经验` |
+| **上传简历触发站内解析** | **已实测（2026-09-22 Moka）**：教育经历 1 → 3 行、项目经验 1 → 3 行，字段总数 49 → 67（稳定后；此前记的 56/68 是解析中途的读数）；解析器还会**覆盖已填字段**，清掉了我先填的 `学校名称`／`研究方向`／`是否有项目经验` |
 
 > **硬规则：上传简历是整个流程的第一步。** 等解析跑完、结构稳定后再 scan、再填。
-> 反过来做，等于把自己刚填的内容交给解析器覆盖。解析是异步的，实测 12 秒后仍在变动。
+> 反过来做，等于把自己刚填的内容交给解析器覆盖。解析是异步的，实测 **4 秒内**就已稳定
+> （旧记的"12 秒后仍在变动"是保守观察）。
+
+### ★ 站内解析的输出一律不用（用户决策，2026-09-22）
+
+**规则**：上传简历只做两件事 —— 满足必填的文件槽位、让经历行被 materialize 出来。
+**解析填出来的值一个都不作为依据**；所有字段一律从档案重新决定，
+**包括解析认为已经填好的那些**。
+
+依据（本次投递实测，89 个字段）：
+
+| 解析的贡献 | 数量 |
+| --- | --- |
+| 填对、我沿用的 | **6** 个（姓名 / 性别 / 邮箱 / `edu[0]` 学历 / 三段教育的年份）≈ **7%** |
+| 填错或残缺、我必须覆盖的 | 4 个（`edu[1]` 学历填成「博士」，实际是硕士；`edu[2]` 就读时间填成港大访学期间） |
+| 该填却完全没填的 | `学校名称`／`院系`／`专业名称`／`受教育类型`／`GPA` —— **三段教育全空** |
+
+用户判断（原话）："就算上传了，你不是还得重复检测字段是否正确，那这样和直接填写没有任何区别。"
+**同意。** 它省掉的工作量约 7%，换来三样成本：
+
+1. **结构依赖** —— 上传必须第一步，且必须等异步解析稳定，否则字段 ID 漂移；
+2. **覆盖风险** —— 解析会清掉已填字段，顺序错了就白填；
+3. **口径污染（本次真踩到，也最隐蔽）** —— 解析是按**简历**的切法生成教育行的
+   （本科 / 硕博连读 / 香港大学访问），而档案的切法是（本科 / 硕士 / 博士）。
+   我一度是**围绕它给的切法**去分析"这三行该填什么"的。
+   解析结果会诱导你用它的口径去理解表单 —— 这比填错一个字段难发现得多。
+
+**不做什么**：不取消上传。`上传简历` 是必填文件槽位，而且**正是解析把经历从 1 行扩成 3 行** ——
+不传就得改用尚未验收的 `addRow` 自己加行。所以继续传、继续等它稳定，**只是不读它的值**。
+
+**执行上的差别**：映射表**完全由档案生成**，不为"解析已经填了"跳过任何字段；
+`readAll()` 只用于核对最终结果，**不用来判断"哪些还需要填"**。
 
 **未验收**：`addRow` 之后的 ID 稳定性（加一行 → 出现 `edu[1]>>` 且 `edu[0]>>` 不变）。
 
@@ -317,20 +466,24 @@ Plan 01 R2 原本只对 `main` 前缀消歧，实测发现非重复区块之间�
 
 ## 九、项目结构
 
-**已落盘**（Phase 1）：`.gitignore`、`package.json`、`engine/engine.js`、`engine/adapters.js`、
-`scripts/status.mjs`、`scripts/inject.mjs`、`tests/` 两个 0 字节占位。
-**尚未**（Phase 2/3）：`skill/`（当前只有空的 `agents/`、`references/` 目录）、`tests/engine.test.mjs`、
-`tests/fixtures/`、`scripts/sync-skill.mjs`、`scripts/capture-fixture.mjs`、README / LICENSE / CHANGELOG、
+**已落盘**：`engine/`（2）、`scripts/`（4：status / inject / capture-fixture / profile）、
+`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（5：engine.test 11 例、profile.test 34 例、
+jsdom 桩、fixture、人工清单）、`docs/`（plans 00–06 + profile-template）。
+**尚未**（Phase 3）：`skill/` 整个目录、`scripts/sync-skill.mjs`、README / LICENSE / CHANGELOG、
 `docs/guide-v2.md`。
 
 ```
 form-pilot/
-├── README.md / LICENSE(MIT+上游署名) / CHANGELOG.md    ← Phase 3
+├── README.md / LICENSE(MIT+上游署名) / CHANGELOG.md    ← Phase 3，未落盘
 ├── AGENTS.md / .gitignore / package.json               ← 已落盘
-├── engine/               # 代码唯一事实源                        ← 已落盘
+├── engine/               # 代码唯一事实源
 │   ├── engine.js         # 单文件IIFE，挂 window.__ja
 │   └── adapters.js       # IIFE幂等挂载 window.__jaAdapters（含 verified 日期）
-├── skill/                # 技能包（自包含可分发）                ← Phase 3
+├── tools/                # 个人档案：字段定义 + I/O + 界面（见 §十一 支线）
+│   ├── profile.schema.mjs   # 14 区段 / 86 字段位的唯一来源（含三分类与 OVERRIDABLE_KEYS）
+│   ├── profile-io.mjs       # 读写 / 校验 / md 导入 / 映射表渲染 / 路径守卫
+│   └── profile-editor.html / .css / .js
+├── skill/                # 技能包（自包含可分发）                ← Phase 3，未落盘
 │   ├── SKILL.md
 │   ├── agents/openai.yaml
 │   └── references/
@@ -339,16 +492,20 @@ form-pilot/
 │       ├── usage.md      # 手工维护散文
 │       └── kimi-webbridge.zh-CN.md  # 从 v1 复制
 ├── scripts/
-│   ├── status.mjs        # 桥接健康检查（区分两种故障）           ← 已落盘
-│   ├── inject.mjs        # 读engine+adapters拼字符串，POST一次evaluate  ← 已落盘
-│   ├── sync-skill.mjs    # engine/ → skill/references/ → ~/.config（单向，含GENERATED头）  ← Phase 3
-│   └── capture-fixture.mjs  # 抓当前页表单outerHTML               ← Phase 2
-├── tests/                                                        ← Phase 2
-│   ├── engine.test.mjs   # node:test + jsdom
+│   ├── status.mjs        # 桥接健康检查（区分两种故障）
+│   ├── inject.mjs        # 读engine+adapters拼字符串，POST一次evaluate
+│   ├── capture-fixture.mjs  # 抓当前页表单outerHTML
+│   ├── profile.mjs       # 档案 CLI（--init/--import/--check/--render/--versions）+ --ui 本地服务
+│   └── sync-skill.mjs    # engine/ → skill/references/ → ~/.config（单向，含GENERATED头）  ← Phase 3，未落盘
+├── tests/
+│   ├── engine.test.mjs   # node:test + jsdom，11 例
+│   ├── profile.test.mjs  # node:test + jsdom，34 例
 │   ├── helpers/jsdom-setup.mjs  # offsetHeight/scrollIntoView桩
 │   ├── fixtures/         # 脱敏HTML（raw/进.gitignore）
 │   └── manual-e2e.md     # 真实浏览器回归清单
-└── docs/plans/           # 00-05：规划、审查、执行路线
+└── docs/
+    ├── profile-template.md
+    └── plans/            # 00–06：规划、审查、执行路线、档案界面
 ```
 
 ## 十、同步方案（唯一事实源）
@@ -359,8 +516,9 @@ form-pilot/
 
 ## 十一、进度与下一步
 
-**路线图的唯一事实源是 `docs/plans/05-execution-architecture.md` §六**（三个 Phase，各自独立可合并）。
-本节只记进度，**不重复那份列表**——两份执行清单必然漂移。
+**路线图的唯一事实源是 `docs/plans/05-execution-architecture.md` §六**（主线三个 Phase，各自独立可合并）。
+个人档案界面是**并行支线**，不依赖桥接，唯一事实源是 `docs/plans/06-profile-ui.md` §八。
+本节只记进度，**不重复那两份列表**——三份执行清单必然漂移。
 
 ### Phase 1 · 骨架 + 引擎可注入 —— 已完成（2026-09-22）
 
@@ -381,7 +539,7 @@ form-pilot/
 
 | 验收 | 结果 |
 | --- | --- |
-| `npm test` | 6/6 通过（detect / scan 字段数与单射 / 区块前缀与类型 / fillTexts 分类 / 行级定位 / main 重名） |
+| `npm test`（engine 部分） | 11/11 通过（detect / scan 字段数与单射 / 区块前缀与类型 / fillTexts 分类 / 行级定位 / main 重名 / fillDate 5 例） |
 | `node scripts/capture-fixture.mjs --session … --site moka` | `{"ok":true,"fields":59,"pageFields":59,"rootTag":"BODY"}` |
 | 真实页受控写（批量填 + 下拉 + 加行 + 回读） | **未做** |
 
@@ -394,6 +552,28 @@ Node 22 把路径参数当模块加载，报 `Cannot find module '…/tests'`。
 ### Phase 3 · 分发与文档 —— 未开始
 
 与桥接完全解耦。桥不可用时它就是唯一能推进的部分。
+
+### 个人档案界面（并行支线）—— Phase 1 + Phase 2 已落地（2026-09-22）
+
+唯一事实源：`docs/plans/06-profile-ui.md`（§八 Phase 划分、§十三 六轮实施记录）。
+**与主线完全解耦**：不触碰 `engine/`，不新增 `__ja.*` 接口，`fillTexts(map)` 的契约不变。
+
+表格式的字段清单**不在本文复制**——唯一来源是 `tools/profile.schema.mjs`（14 区段 / 86 字段位）。
+
+| 验收 | 结果 |
+| --- | --- |
+| `npm test`（profile 部分） | 34/34 通过 |
+| `--import` / `--check`（真实档案） | `matchedFields 78`、`notes []`、`errors 0`、`warnings 0`、`completeness 174/184`（第七轮拆 `emergencyContact`、第八轮加 `hobbies` 之后） |
+| `--render` 泄漏检查 | `证件号码` 只出现在「待你手动」清单，不进任何值表 |
+| 路径守卫 | `<root>/private/` 之外的写入被拒，退出码 1 |
+| `--ui` 真实浏览器核对 | 三栏 210/769/240 且无横向溢出；围栏存在含 1 行；完整度 `25/57` 与服务端一致 |
+
+**未做**：窄屏断点（768 / 1024）未实测；`tests/manual-e2e.md` 档案那节的 9 条人工核对
+只过了 2 条（#1 三栏比例、#2 朱砂围栏），其余 7 条待补。这 7 条属人工核对，不阻塞主线。
+
+**`private/` 不在本工作区**（gitignored，每个 checkout 各一份 —— `06 §一` 的 F5 就是这条漂移风险）。
+真实档案在哪个 checkout 就用 `--root <该处>` 指过去；在别处跑 `--ui` 看到空档状态是正常现象，
+不是数据丢了。
 
 ### git
 

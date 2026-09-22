@@ -90,8 +90,13 @@ export const SECTIONS = [
       f('wechat', '微信', 'text', 'auto', { aliases: ['微信号'] }),
       f('github', 'GitHub', 'text', 'auto'),
       f('orcid', 'ORCID', 'text', 'auto'),
-      f('emergencyContact', '紧急联系人 / 电话', 'text', 'confirm', { hint: '含第三方个人信息，逐项确认后再填' }),
+      f('emergencyContactName', '紧急联系人', 'text', 'confirm', { hint: '第三方个人信息，逐项确认后再填' }),
+      f('emergencyContactPhone', '紧急联系人电话', 'tel', 'confirm', {
+        validate: err(/^\+?[\d\-\s()]{6,25}$/, '应为电话号码（可带区号与分隔符）'),
+        hint: '与联系人分开存 —— 合并成一个字符串时，只想取电话的表单格没法填',
+      }),
       f('failedCourses', '挂科门数', 'text', 'auto', { hint: '表单常问，没有就写 0' }),
+      f('hobbies', '个人爱好', 'text', 'auto', { hint: '本硕博表单常单独问一格，分隔符随表单，用顿号最常见' }),
     ],
   },
   {

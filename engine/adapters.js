@@ -20,9 +20,18 @@ window.__jaAdapters = window.__jaAdapters || {
     //   `apply-fields-*`，把 wrapper 当字段（实测 49 个真字段 → 误报 65 个）。
     fieldSel: '[class*=apply-field-]',
     labelSel: '[class*=title]',
+    // ★ menuSel 同时匹配面板（sd-Select-menu-*）与每个选项外层的 sd-Menu-container-*，
+    //   而两者是父子关系 —— 实测「民族」一次弹出 1 个面板 + 58 个单项容器。
+    //   收窄由引擎的 visibleMenus() 做「嵌套只留最外层」，**不要在这里删掉 sd-Menu-container**：
+    //   别的下拉形态可能只渲染后者，删了会静默少一类菜单。
     menuSel: '[class*=sd-Select-menu],[class*=sd-Menu-container]',
     itemSel: '[class*=sd-Menu-content-item]',
     valueSel: '[class*=sd-Input-display-value]',
+
+    // 选择式月区间（如「就读时间」）：容器 + 内部 4 个下拉，
+    // DOM 序 = 起始年 / 起始月 / 结束年 / 结束月。实现见 engine.js fillMonthRange。
+    rangeSel: '[class*=month-range-select]',
+    rangeSelectSel: '[class*=sd-Select-container]',
 
     // 区块 = apply-block-*（16 个 section，其中 9 个带加行按钮）；
     // 行分组 = apply-fields-*，行索引取"该分组在区块内的序号"。

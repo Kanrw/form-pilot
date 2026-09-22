@@ -138,3 +138,115 @@ test('fillDate() 拒绝非日期字段与非法格式', async () => {
   const c = JSON.parse(await ja.fillDate('main>>不存在', '2022'));
   assert.equal(c.err, 'field-not-found');
 });
+
+test('fillDate() 在选择式日期上动手前就转向 fillMonthRange', async () => {
+  const ja = loadEngine(makeDom(RANGE_HTML));
+  const r = JSON.parse(await ja.fillDate('main>>就读时间', '2022-09'));
+  // ★ 实测 Moka「毕业时间（月）」「英语证书获得时间」是 2 个下拉的单月变体，
+  //   「就读时间」是 4 个下拉的区间变体，容器类名都是 month-range-select，都没有文本框。
+  //   不提前挡掉的话，fillDate 会先往下拉内部的 input 写字（污染控件），再报 display-not-updated，
+  //   而报错只字不提真正该用的方法。
+  assert.equal(r.err, 'select-based-date');
+  assert.equal(r.wrote, undefined, '一个字都不该写进去');
+  assert.match(r.hint, /fillMonthRange/);
+});
+
+// ── 月区间（fillMonthRange）与菜单候选去嵌套 ─────────────────────────
+//
+// 菜单出现时序 jsdom 测不了（没有真实渲染），能测的是：字段定位、参数校验、下拉计数，
+// 以及"候选里互相嵌套的元素只留最外层"这条纯 DOM 关系。
+
+const RANGE_HTML = `
+<div class="apply-field-m1 string_info">
+  <div class="title-m1"><span><span>民族</span></span></div>
+  <div class="sd-Select-container-m1"><input class="sd-Input-input"></div>
+</div>
+<div class="apply-field-m2 date_info">
+  <div class="title-m2"><span><span>就读时间</span></span></div>
+  <div class="month-range-select-x">
+    <span><div class="sd-Select-container-a"></div></span>
+    <span><div class="sd-Select-container-b"></div></span>
+    <span><div class="sd-Select-container-c"></div></span>
+    <span><div class="sd-Select-container-d"></div></span>
+  </div>
+</div>
+<div class="apply-field-m3 date_info">
+  <div class="title-m3"><span><span>半截区间</span></span></div>
+  <div class="month-range-select-x">
+    <span><div class="sd-Select-container-e"></div></span>
+    <span><div class="sd-Select-container-f"></div></span>
+  </div>
+</div>`;
+
+test('fillMonthRange() 只认月区间字段', async () => {
+  const ja = loadEngine(makeDom(RANGE_HTML));
+  const a = JSON.parse(await ja.fillMonthRange('main>>民族', '2022-09'));
+  assert.equal(a.err, 'not-a-month-range', '普通下拉不该被当成月区间');
+  const b = JSON.parse(await ja.fillMonthRange('main>>不存在', '2022-09'));
+  assert.equal(b.err, 'field-not-found');
+});
+
+test('fillMonthRange() 非法年月在写页面前就拦住', async () => {
+  const ja = loadEngine(makeDom(RANGE_HTML));
+  assert.equal(JSON.parse(await ja.fillMonthRange('main>>就读时间', '去年')).err, 'bad-ym');
+  assert.equal(JSON.parse(await ja.fillMonthRange('main>>就读时间', '22-09')).err, 'bad-ym');
+  // ★ 月份越界必须在这里拦住。放过去会一路走到下拉里匹配不到，报的是 option-not-found，
+  //   排查者会去怀疑站点改版，而真凶通常是档案里的日期写错了。
+  assert.equal(JSON.parse(await ja.fillMonthRange('main>>就读时间', '2022-09', '2023-13')).err, 'bad-ym');
+});
+
+test('fillMonthRange() 下拉不够时报出缺几个，而不是硬填', async () => {
+  const ja = loadEngine(makeDom(RANGE_HTML));
+  const r = JSON.parse(await ja.fillMonthRange('main>>半截区间', '2022-09', '2023-09'));
+  assert.equal(r.err, 'range-selects-missing');
+  assert.equal(r.selects, 2, '实际只有起始两个下拉');
+  assert.equal(r.need, 4, '给了结束时间就需要 4 个');
+});
+
+test('菜单候选里嵌套的元素只留最外层：失败报告的 menus 不虚报', async () => {
+  const dom = makeDom(`
+<div class="apply-field-n1 string_info">
+  <div class="title-n1"><span><span>民族</span></span></div>
+  <div class="sd-Select-container-n1"><input class="sd-Input-input"></div>
+</div>`);
+  const ja = loadEngine(dom);
+  const doc = dom.window.document;
+  let fired = false;
+  doc.addEventListener('click', () => {
+    if (fired) return;
+    fired = true;
+    const panel = doc.createElement('div');
+    panel.className = 'sd-Select-menu-n1';
+    panel.innerHTML = '<div class="sd-Menu-container-p"><div class="sd-Menu-content-item-p">汉族</div></div>'
+      + '<div class="sd-Menu-container-q"><div class="sd-Menu-content-item-q">壮族</div></div>';
+    doc.body.appendChild(panel);
+  });
+
+  const r = JSON.parse(await ja.pickOption('main>>民族', '不存在的选项'));
+  assert.equal(r.err, 'option-not-found');
+  // ★ 实测 Moka 点开「民族」一个下拉，menuSel 同时命中面板与它内部的 58 个
+  //   sd-Menu-container-*。若不去嵌套，这里会报 3（1 面板 + 2 单项容器），
+  //   让现场排查的人以为同时弹了 3 个菜单。
+  assert.equal(r.menus, 1, '嵌套的选项容器不该计入候选');
+  assert.deepEqual(r.available, ['汉族', '壮族'], '面板里的选项要能被读到');
+});
+
+test('标签页在后台时立即报错，不进入无限等待', async () => {
+  const dom = makeDom(RANGE_HTML);
+  const ja = loadEngine(dom);
+  // ★ 实测：hidden 标签页里 `await new Promise(r => setTimeout(r, 1500))` 30 秒都没触发，
+  //   而同页的同步 evaluate 秒回 —— 定时器被节流，所有 await sleep 永不返回。
+  //   这类失败不报错、不返回、也不超时，所以入口必须自己拦。
+  Object.defineProperty(dom.window.document, 'hidden', { value: true, configurable: true });
+
+  assert.equal(JSON.parse(await ja.fillMonthRange('main>>就读时间', '2022-09')).err, 'tab-hidden');
+  assert.equal(JSON.parse(await ja.pickOption('main>>民族', '汉族')).err, 'tab-hidden');
+  assert.equal(JSON.parse(await ja.fillDate('main>>就读时间', '2022')).err, 'tab-hidden');
+  assert.equal(JSON.parse(await ja.addRow('edu')).err, 'tab-hidden');
+
+  const c = JSON.parse(await ja.fillTexts({ 'main>>民族': 'x', 'main>>就读时间': 'y' }));
+  assert.equal(c.ok, 0);
+  assert.equal(c.err, 'tab-hidden');
+  assert.equal(c.failed.length, 2, '形状不变：每个字段各报一条');
+  assert.deepEqual(c.retried, []);
+});
