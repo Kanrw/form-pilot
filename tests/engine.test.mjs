@@ -307,3 +307,89 @@ test('feishu 适配器：~= 完整词匹配选盒子，label 作字段名，重�
   assert.equal(s.total, new Set(s.fields.map((f) => f.id)).size, 'ID 单射');
   assert.ok(s.fields.every((f) => f.label), '每个盒子都取到 label');
 });
+
+// ── 北森（beisen）｜2026-09-22 首次适配（R3 触发站）───────────
+// 结构事实来自粤芯半导体真实表单的只读探测 + 同步受控写验证：
+//   单选是 div.phoenix-radio（无 input），选中态 = core 上的 --checked 修饰类；
+//   合成事件必须带 pointerdown/pointerup 才点得动（engine.js setChoice 注释的实测）。
+
+const BEISEN_HTML = `<div>
+  <div class="form-item">
+    <div class="form-item__title"><label class="form-item__text">姓名</label></div>
+    <div class="form-item__control"><input type="text" class="phoenix-input__input" value=""></div>
+  </div>
+  <div class="form-item">
+    <div class="form-item__title"><label class="form-item__text">性别</label></div>
+    <div class="form-item__control">
+      <div class="phoenix-radio-group">
+        <div class="phoenix-radio-group__radioItem"><div class="phoenix-radio phoenix-radio--withLabel"><div class="phoenix-radio__wrapper"><div class="phoenix-radio__circle-wrapper"><div class="phoenix-radio__circle"></div><div class="phoenix-radio__dot"></div></div><span class="phoenix-radio__radio-text">男</span></div></div></div>
+        <div class="phoenix-radio-group__radioItem"><div class="phoenix-radio phoenix-radio--withLabel"><div class="phoenix-radio__wrapper"><div class="phoenix-radio__circle-wrapper"><div class="phoenix-radio__circle"></div><div class="phoenix-radio__dot"></div></div><span class="phoenix-radio__radio-text">女</span></div></div></div>
+        <div class="phoenix-radio-group__radioItem"><div class="phoenix-radio phoenix-radio--withLabel"><div class="phoenix-radio__wrapper"><div class="phoenix-radio__circle-wrapper"><div class="phoenix-radio__circle"></div><div class="phoenix-radio__dot"></div></div><span class="phoenix-radio__radio-text">保密</span></div></div></div>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+// 模拟真实 phoenix 组件的点击契约：点选项 → 全组清 checked，该项 core 加 --checked。
+// jsdom 没有 React，不靠这个监听器 setChoice 的验证就必须报 not-checked（第 3、4 个用例的分界）。
+function mockPhoenixRadio(dom) {
+  const group = dom.window.document.querySelector('.phoenix-radio-group');
+  group.addEventListener('click', (e) => {
+    group.querySelectorAll('.phoenix-radio--checked')
+      .forEach((c) => c.classList.remove('phoenix-radio--checked'));
+    const item = e.target.closest('.phoenix-radio-group__radioItem');
+    if (item) item.querySelector('.phoenix-radio').classList.add('phoenix-radio--checked');
+  });
+}
+
+test('detect() 认北森签名（.form-item + phoenix）', () => {
+  assert.equal(loadEngine(makeDom(BEISEN_HTML), { adapters: false }).detect(), 'beisen');
+});
+
+test('北森 scan()：div-radio 判为 choice，input 判为 text', () => {
+  const s = JSON.parse(loadEngine(makeDom(BEISEN_HTML), { adapter: 'beisen' }).scan());
+  const byId = Object.fromEntries(s.fields.map((f) => [f.id, f]));
+  assert.equal(byId['性别'].type, 'choice', '无 input 的 div-radio 不能落进 unknown/text');
+  assert.equal(byId['姓名'].type, 'text');
+});
+
+test('R3 setChoice()：点中选项并凭 --checked 验证成功', async () => {
+  const dom = makeDom(BEISEN_HTML);
+  mockPhoenixRadio(dom);
+  const ja = loadEngine(dom, { adapter: 'beisen' });
+  const r = JSON.parse(await ja.setChoice('性别', '男'));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.checked, ['男']);
+});
+
+test('R3 setChoice()：选项不存在时报 available，不瞎点', async () => {
+  const dom = makeDom(BEISEN_HTML);
+  mockPhoenixRadio(dom);
+  const ja = loadEngine(dom, { adapter: 'beisen' });
+  const r = JSON.parse(await ja.setChoice('性别', '外星'));
+  assert.equal(r.ok, false);
+  assert.equal(r.err, 'option-not-found');
+  assert.ok(r.available.includes('男'));
+});
+
+test('R3 setChoice()：适配器不支持单选时明确报 no-choice-support', async () => {
+  // generic 探针连 choice 字段都扫不到（field-not-found 在前），测不到这条分支；
+  // 用 beisen 适配器但剥掉 radio 声明，模拟"站点认了、但选择器没配"。
+  const dom = makeDom(BEISEN_HTML);
+  const ja = loadEngine(dom, { adapter: 'beisen' });
+  ja.use({ radioGroupSel: null, radioItemSel: null, radioCheckedSel: null });
+  const r = JSON.parse(await ja.setChoice('性别', '男'));
+  assert.equal(r.ok, false);
+  assert.equal(r.err, 'no-choice-support');
+});
+
+test('R3 setChoice()：点完没有 checked 证据时绝不报成功（not-checked）', async () => {
+  // 不装 mockPhoenixRadio —— 点击不产生选中态（如同真实站点没点动）。
+  // 纪律：一个"看起来点了、实际没选上"的 ok:true 比明确失败危险得多（fillDate 同一条）。
+  const dom = makeDom(BEISEN_HTML);
+  const ja = loadEngine(dom, { adapter: 'beisen' });
+  const r = JSON.parse(await ja.setChoice('性别', '男'));
+  assert.equal(r.ok, false);
+  assert.equal(r.err, 'not-checked');
+  assert.deepEqual(r.checked, []);
+});

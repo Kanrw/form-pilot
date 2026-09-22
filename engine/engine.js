@@ -5,7 +5,8 @@
 // 注入方式：scripts/inject.mjs —— 本文件 + adapters.js 拼成一个字符串，一次 evaluate。
 // 版本号：与 skill/SKILL.md frontmatter 的 version、CHANGELOG 最新条目保持一致（D-5）。
 //
-// 本文件不含 R3/R4/R5/R8/R9 的任何实现或占位，见 AGENTS.md §2.4。
+// 已实现的推迟项：R3（单选 setChoice，北森触发）、R4（fillDate / fillMonthRange）。
+// 仍不实现：R5/R8/R9 与 R3 的多选"确定"钩子（无已命名失败），见 AGENTS.md §2.4。
 
 (() => {
 if (window.__ja) return 'already loaded';
@@ -66,6 +67,9 @@ const A = {
   fileSel: 'input[type=file]',
   rangeSel: null,          // 选择式月区间的容器标记（Moka: [class*=month-range-select]）
   rangeSelectSel: null,    // 区间内 4 个下拉的容器，DOM 序 = 起始年 / 起始月 / 结束年 / 结束月
+  radioGroupSel: null,     // R3 单选组容器（北森: .phoenix-radio-group）
+  radioItemSel: null,      // 组内选项（北森: .phoenix-radio-group__radioItem）
+  radioCheckedSel: null,   // 选中态标记（北森: core 上的 .phoenix-radio--checked）
 };
 
 // ── 字段与类型 ──────────────────────────────────────────
@@ -452,6 +456,56 @@ window.__ja = {
 
     const value = readSelect(box);
     return j({ ok: norm(value) === norm(optionText) || value.indexOf(optionText) >= 0, id, value: trunc(value) });
+  },
+
+  // 单选点选（R3，2026-09-22 由北森实际使用触发，AGENTS.md §2.4）。
+  //
+  // 命名失败：北森「性别」是 div.phoenix-radio，**没有 input** —— fillTexts 拒绝 choice 类，
+  // pickOption 找的是下拉菜单，两个现有方法都盖不住，只能人工点。
+  // 与下拉的本质区别：选项常驻字段盒内（不需要开菜单），选中态是组件类名而非菜单项。
+  //
+  // 实测（粤芯表单）两条硬事实：
+  //   1. 选中标记 = core 元素上的 --checked 修饰类（圆点 opacity 恒 0，由类名驱动样式）。
+  //   2. 合成事件必须带 pointerdown/pointerup —— 只发 mousedown/mouseup/click 三件套
+  //      点不动 phoenix radio（第一遍探测实测无反应）。
+  // 多选菜单"确定"钩子不做：本页没有多选字段，没有已命名的失败（§2.3）。
+  async setChoice(id, optionText) {
+    if (tabHidden()) return j({ ok: false, err: 'tab-hidden', id, hint: HIDDEN_HINT });
+    const box = findField(id);
+    if (!box) return j({ ok: false, err: 'field-not-found', id });
+    if (!A.radioGroupSel || !A.radioItemSel || !A.radioCheckedSel) {
+      return j({ ok: false, err: 'no-choice-support', id, hint: '适配器未声明 radioGroupSel/radioItemSel/radioCheckedSel' });
+    }
+
+    const itemsOf = (b) => {
+      const group = b && b.querySelector(A.radioGroupSel);
+      if (!group) return null;
+      return [...group.querySelectorAll(A.radioItemSel)]
+        .filter((x) => x.offsetHeight > 0 && x.textContent.trim());
+    };
+    const items = itemsOf(box);
+    if (!items) return j({ ok: false, err: 'not-a-choice-field', id, type: typeOf(box) });
+    const target = matchItem(items, optionText);
+    if (!target) {
+      return j({ ok: false, err: 'option-not-found', id, optionText,
+        available: items.slice(0, 10).map((x) => x.textContent.trim().slice(0, 15)) });
+    }
+
+    target.scrollIntoView({ block: 'center' });
+    const Mk = (t) => (window.PointerEvent && t.indexOf('pointer') === 0 ? PointerEvent : MouseEvent);
+    for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      target.dispatchEvent(new (Mk(t))(t, { bubbles: true, cancelable: true, view: window }));
+    }
+    await sleep(400);
+
+    // 验证：选中态必须是可观察的 DOM 证据，不许"点完就算"（与 fillDate 同一条纪律）。
+    // 元素引用不跨 sleep 复用：重渲染可能换掉整组，验证前重新定位。
+    const checked = (itemsOf(findField(id) || box) || [])
+      .filter((x) => x.querySelector(A.radioCheckedSel))
+      .map((x) => x.textContent.trim());
+    const ok = checked.length === 1
+      && (norm(checked[0]) === norm(optionText) || checked[0].indexOf(optionText) >= 0);
+    return j({ ok, id, checked, err: ok ? '' : 'not-checked' });
   },
 
   // 日期直填（R4，2026-09-22 由用户触发：多数站点的日期是若干文本框而非下拉，可以直填）。

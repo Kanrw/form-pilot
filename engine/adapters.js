@@ -102,19 +102,32 @@ window.__jaAdapters = window.__jaAdapters || {
     blockGroupSel: null,
   },
 
-  // ── 北森（*.zhiye.com）｜仅文档来源，未实测 ───────────────
-  // 故意不声明 blockSections / typeMap：没有真实探测就没有依据。
-  // 已知（来自 v1 指南，未实测）：单选是 div.phoenix-radio；多选菜单选完要点"确定"。
-  // 这两项属于 R3，按 AGENTS.md §2.4 推迟到首次实际使用。
+  // ── 北森（*.zhiye.com）｜实测 2026-09-22 ───────────────────
+  // 探测来源：粤芯半导体 cansemitech.zhiye.com 器件工程师校招表单（L2 只读 + 同步受控写验证）。
+  // 三条实测推翻 v1 指南的猜测：
+  //   1. 菜单不是 .common-unmodeled-layer（该类名不存在）。页面上每个下拉控件自身就是
+  //      .phoenix-unmodeled-layer 内联包裹 —— 把它当菜单会命中全部 19 个控件。
+  //      真菜单 .phoenix-selectList 只在往可编辑下拉（phoenix-select--editable）里
+  //      输入文字后才出现（父级 phoenix-selectList__virtualList-holder-inner）。
+  //   2. 单选是 div.phoenix-radio，**没有 input**，选中态 = core 上的 phoenix-radio--checked
+  //      修饰类（圆点 opacity 恒 0，靠类名驱动）。且合成事件必须带 pointerdown/pointerup，
+  //      只发 mouse* 三件套点不动（R3 setChoice 的依据，见 engine.js）。
+  //   3. 区块（个人信息/教育经历/…）只有锚点导航，没有可定位的 section 容器类名 ——
+  //      不加 blockSections，重复 label 靠 scan 的 #n 消歧（与飞书首版同策略）。
   beisen: {
     name: 'beisen',
-    verified: null,
-    source: 'docs-only',
+    verified: '2026-09-22',
+    source: 'https://cansemitech.zhiye.com/form?fromPage=job&jobAdId=8b85a5b2-c57f-408c-881e-7191f47a0b09',
     fieldSel: '.form-item',
     labelSel: 'label',
-    menuSel: '.common-unmodeled-layer',
-    itemSel: '.phoenix-selectList__singleLabel,.list-item-container',
+    // 值验证（valueSel）：placeholder 元素带 --show 修饰类时表示空；选中后其文本被替换。
+    // L3 实测确认前，readSelect 对"请选择"文本有兜底过滤，不会把空值当值报。
+    menuSel: '.phoenix-selectList',
+    itemSel: '.phoenix-selectList__listItem',
     valueSel: '.phoenix-select__placeHolder',
+    radioGroupSel: '.phoenix-radio-group',
+    radioItemSel: '.phoenix-radio-group__radioItem',
+    radioCheckedSel: '.phoenix-radio--checked',
   },
 
   // ── 通用探针：全部留空，即引擎内置默认值（fieldSel=null 走 input 就近容器，etc.）──
