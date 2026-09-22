@@ -1,0 +1,11 @@
+{
+  "name": "form-pilot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.1"
+  }
+}
