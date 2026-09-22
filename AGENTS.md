@@ -18,7 +18,11 @@
 
 - 真实个人信息只放 `private/`（已在 `.gitignore`）。**不要放进 `data/`** ——
   本机 `~/Documents/FindAJob/resume/data/` 是**被提交**的资产目录，同名反义。
-- 档案字段清单与三类字段的处理约定见 `docs/profile-template.md`。
+- 档案是两个文件：字段定义（含三类分类）在 `tools/profile.schema.mjs`，值在 `private/profile.json`；
+  人读镜像与 `--import` 的输入格式是 `docs/profile-template.md`。界面：`node scripts/profile.mjs --ui`。
+- 分类只写 schema，不写进数据文件。`never` 类（证件号码等）在界面上进朱砂虚线围栏，
+  且**不进任何映射**：`--render` 与 `GET /api/mapping` 的输出里一项都不许出现，有测试盯着这条。
+- 写入路径由代码守着：`scripts/profile.mjs` 与服务端的任何落盘都必须落在 `<root>/private/` 内，越界直接拒绝。
 - **推送前必须验证**：`git ls-files | grep -E '^private/'` 输出为空。
   把 profile 内容或附件搬进 `tests/fixtures/`、`docs/`、`CHANGELOG` 同样违规。
 - 身份证号、银行卡号、密码、验证码属**永不自动填**：引擎不提供也不接受这类值，
@@ -97,7 +101,7 @@
 
 ### 规划阶段（已完成）
 
-五份规划文档，`form-pilot/docs/plans/`：
+规划文档，`form-pilot/docs/plans/`：
 
 | 文件 | 内容 | 行数 |
 | --- | --- | --- |
@@ -106,6 +110,8 @@
 | `02-adapters-testing.md` | 站点适配与持续学习策略 | ~95 |
 | `03-project-packaging.md` | 项目结构、打包与文档 | 152 |
 | `04-reality-check-2026-09-22.md` | 实况审查：AGENTS.md/01/02/03 对磁盘、git、桥接实测的逐条核对 | — |
+| `05-execution-architecture.md` | 执行路线与架构（终版，取代 00 的路线图与 03 的实施清单） | 279 |
+| `06-profile-ui.md` | 个人档案界面：路线 B（本地 Node 服务）+ 方向 A（向导已撤，见 §六）；**已实施**，偏差与验证证据见 §十三 | 468 |
 
 ### 核心决定（用户决策，2026-09-22）
 
@@ -143,6 +149,11 @@
 - 启动：`~/.kimi-webbridge/bin/kimi-webbridge start`
 - macOS/Linux 调用模板：`curl -s -X POST http://127.0.0.1:10086/command -H 'Content-Type: application/json' -d '{"action":...,"args":...,"session":"..."}'`
 - Windows：内联 JSON 会乱码，必须用 `--data-binary @file`
+- **动作参数形状**（2026-09-22 实测）：`evaluate` 的参数名是 **`code`**，写成 `expression`
+  会回 `{"ok":false,"error":{"message":"evaluate: code is required"}}`；`navigate` 用
+  `{url,newTab,group_title}`；`screenshot` 用 `{path,fullPage}`，返回 `{format,path,sizeBytes}`
+  并把 png 落到磁盘。**这是零安装做"真实渲染核对"的路子** —— 不用装浏览器自动化工具，
+  直接开页 + `evaluate` 取 `getBoundingClientRect()` 就能核版式，`screenshot` 能拿到画面。
 - 固定 session 名约定：同一任务一个 session，如 `form-v01`、`adapter-research`
 
 **桥接状态是当场读数，不是本文件的常驻事实。** 2026-09-22 发生过两次状态反转（10:11 daemon 被终止、
