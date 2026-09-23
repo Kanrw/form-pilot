@@ -25,7 +25,9 @@ const flag = (name, dflt) => {
 
 const session = flag('--session', null);
 const adapter = flag('--adapter', 'auto');
-const known = ['auto', 'moka', 'beisen', 'generic'];
+// ★ 名单必须与 engine/adapters.js 的注册项对齐：漏一个，那个站点就只能靠 auto 碰运气，
+//   显式指定的时候还会报 unknown --adapter（feishu 就漏过一次）。
+const known = ['auto', 'moka', 'beisen', 'feishu', 'generic'];
 
 function out(obj, code) {
   console.log(JSON.stringify(obj));

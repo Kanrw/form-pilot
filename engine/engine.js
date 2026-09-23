@@ -5,8 +5,9 @@
 // 注入方式：scripts/inject.mjs —— 本文件 + adapters.js 拼成一个字符串，一次 evaluate。
 // 版本号：与 skill/SKILL.md frontmatter 的 version、CHANGELOG 最新条目保持一致（D-5）。
 //
-// 已实现的推迟项：R3（单选 setChoice，北森触发）、R4（fillDate / fillMonthRange）。
+// 推迟项里已实现的：R3（单选 setChoice，北森触发）、R4（fillDate / fillMonthRange）。
 // 仍不实现：R5/R8/R9 与 R3 的多选"确定"钩子（无已命名失败），见 AGENTS.md §2.4。
+// 新增站点只动 adapters.js，本文件只认接口不认网站。
 
 (() => {
 if (window.__ja) return 'already loaded';

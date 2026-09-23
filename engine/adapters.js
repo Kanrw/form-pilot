@@ -77,8 +77,11 @@ window.__jaAdapters = window.__jaAdapters || {
     ],
   },
 
-  // ── 飞书招聘（*.jobs.feishu.cn）｜只读探测 2026-09-22 ─────
-  // 探测来源：记忆科技（深圳）校招申请页，scripts/probe.mjs + 结构核对，未写入。
+  // ── 飞书招聘（*.jobs.feishu.cn）｜L2 只读 + L3 受控写已验证 2026-09-22 ─────
+  // 探测来源：记忆科技（深圳）校招申请页（URL 含个人 resumeId，不入库）。
+  // L3 实测：10 个文本全中、8 个下拉全中、上传成功，停在提交按钮前（见 tests/manual-e2e.md）。
+  // 遗留局限：菜单常驻 DOM，pickOption 的"新出现菜单"判据会复发 menu-not-open，
+  // 需靠手动事件序列打开；月区间与期望工作地点当时跳过。
   // 组件库 atsx-*。与 Moka 的根本差异：类型写在**内部组件**类名上
   // （atsx-select-search / atsx-date-picker），字段盒子只有 atsx-form-item 一个 token ——
   // 类型判定靠引擎的子树判据（engine.js heuristicType 2026-09-22 新增），typeMap 无从写起。
