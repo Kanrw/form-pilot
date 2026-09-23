@@ -6,7 +6,6 @@
 //   node scripts/check-private-leak.mjs --staged         # 扫暂存区内容 ← pre-commit 钩子用
 //   node scripts/check-private-leak.mjs --history        # 扫全部 git 历史 ← 事后审计，npm run check:privacy:history
 //   node scripts/check-private-leak.mjs --patterns       # 只跑模式判据，不要求 private/ ← CI / 新克隆
-//
 // **扫描范围与判据是两维**（--staged/--history 是范围，--patterns 是判据），可以叠加：
 //   --staged --patterns  = 扫暂存区、只跑模式判据（新克隆的 pre-commit 走这条）
 //   --patterns 单独用    = 扫工作树、只跑模式判据（CI 走这条）
@@ -48,18 +47,23 @@ const argv = new Set(process.argv.slice(2));
 const SCOPE = argv.has('--history') ? 'history' : argv.has('--staged') ? 'staged' : 'tree';
 // 判据：--patterns 表示"不要求 private/"，与范围正交
 const NO_PROFILE = argv.has('--patterns');
-const ALLOW_MISSING = argv.has('--allow-missing-profile');
 
 // ★ 守卫自己也必须被扫（2026-09-23）。旧版把本文件排除在扫描之外，理由说不清；
 // 结果是"守卫里写进真值"成了盲区 —— 实测当场踩到一次：白名单里手滑写了一行真实手机号，
-// 因为文件被排除，三种模式一个都没报出来。排除清单越短越好，现在只剩 package-lock。
-const EXCLUDE = new Set(['package-lock.json']);
+// 因为文件被排除，三种模式一个都没报出来。
+//
+// 现在**排除清单是空的**：曾排除 `package-lock.json`（无理由，纯遗留），2026-09-23 取消后
+// 实测 tree 与 patterns 两种模式都干净（127 个档案值 + 3 类模式 × 52 个已跟踪文件），
+// 于是决定不再排除 —— 盲区少一个是一个。要重新加排除项，必须先给出**实测命中**，
+// 并把命中的字符串形态与"为什么它不是个人数据"写在这里。
 // git 把含 NUL 的文件当二进制；逐行文本判据对它没意义，但**不能静默跳过**，只对二进制生效。
 const BINARY = /\u0000/;
 
-function isExcluded(f) {
-  return EXCLUDE.has(f) || f.endsWith('package-lock.json');
-}
+// 排除清单：保持为空。曾排除 `package-lock.json`（无理由、纯遗留）—— 2026-09-23 真的取消后
+// 实测 tree / staged / patterns 三种范围都干净，于是永久去掉：盲区少一个是一个。
+// 要重新加排除项，必须先给出**实测命中**，并把命中的字符串形态与"为什么它不是个人数据"写在上面。
+// （踩过的坑：macOS 是 BSD grep，`grep "a\|b"` 不支持交替 —— 当时据此判断"排除已取消"是错的，
+//   实际 Set 还在生效，白跑了一轮实验。这类判断用 Grep 工具或 grep -E。）
 
 // 结构上的键名/提示语本就是模板，不该被当成泄漏；命中这些前缀的值跳过。
 const SKIP_KEYS = /^(meta|schema|\$schema|version|updatedAt|createdAt)\b/;
@@ -158,7 +162,7 @@ function trackedPrivatePaths() {
 
 function treeEntries() {
   return git('ls-files').split('\n')
-    .filter((f) => f && !isExcluded(f))
+    .filter((f) => !!f)
     .map((f) => [f, readFileSync(join(ROOT, f), 'utf8')]);
 }
 
@@ -167,7 +171,6 @@ function treeEntries() {
 function stagedEntries() {
   const names = git('diff', '--cached', '--name-only', '--diff-filter=ACMR').split('\n').filter(Boolean);
   return names
-    .filter((f) => !isExcluded(f))
     .map((f) => [f + ' (staged)', git('show', `:${f}`)])
     .filter(([, text]) => !BINARY.test(text));
 }
@@ -197,14 +200,16 @@ export function collectEntries(scope) {
 function main() {
   const needValues = !NO_PROFILE;
   const values = needValues ? collectPrivateValues() : null;
-  if (needValues && !values && !ALLOW_MISSING) {
+  if (needValues && !values) {
     const hasPrivateDir = existsSync(join(ROOT, 'private'));
     if (hasPrivateDir) {
       // 本该有档案却没有 → 拒绝放行。这是防"改名/误删掉档案让守卫静默失效"。
+      // 不提供 --allow-missing-profile 这类逃生门（2026-09-23 删）：零调用方，
+      // 而它就是"让守卫失效"本身。要临时跳过就显式改用 --patterns，那会留下可见痕迹。
       console.error('check-private-leak: 拒绝放行 —— private/ 目录在，但读不出 profile.json。');
       console.error('  这是**失败关闭**，不是错误：档案本该在这里，读不出来就得先查清楚。');
       console.error('  查因：private/profile.json 是否被改名/删掉/写成坏 JSON？');
-      console.error('  确实要在此机器上跳过:  --allow-missing-profile');
+      console.error('  确认只是本机缺档案、要继续，请显式用 --patterns（只跑模式判据，覆盖面更小）。');
       process.exit(1);
     }
     // private/ 根本不存在（新克隆 / 贡献者机器）→ 降级为模式判据，但把话说明白。
