@@ -1,10 +1,17 @@
 # ── 隐私边界：以下任何一项被提交即等于泄露 ──────────────────
-# private/ 放真实个人信息（档案、证件照、附件副本）。
+# private/ 放真实个人信息（档案、证件照、附件副本、抓下来的岗位与 PDF）。
 # 命名刻意叫 private 而不是 data：本机 ~/Documents/FindAJob/resume/data/ 是
 # **被提交**的资产目录，同名反义，容易误判。模板见 docs/profile-template.md。
+# 另外还有一层：档案值会被抄进测试/schema/实测记录，那部分由
+# scripts/check-private-leak.mjs 拦，.gitignore 管不到。
 private/
 
 .DS_Store
 node_modules/
 tests/fixtures/raw/
 .workbuddy/
+
+# 本地产物与日志
+*.log
+coverage/
+.env
