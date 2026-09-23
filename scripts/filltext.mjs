@@ -20,8 +20,7 @@
 //
 // 用法：
 //   node scripts/filltext.mjs --session <名> --set "姓名=王铭龙" --set "外语等级=六级"
-//   node scripts/filltext.mjs --session <名> --json <pairs.json>     # [[label, value], ...]
-//   node scripts/filltext.mjs --session <名> --set "..." --dry       # 只定位与回读，不写
+//   node scripts/filltext.mjs --session <名> --json <pairs.json>     # [[label, value], ...] 或 [{label,index,value}]
 // 输出：{ok, total, written, failed:[...], results:[{label, before, wrote, readback, ok}]}
 
 import { readFileSync } from 'node:fs';
@@ -84,7 +83,6 @@ const unwrap = (v) => { let g = 0; while (typeof v === 'string' && g++ < 4) { tr
 
 async function main() {
   const session = flagOne('--session', null);
-  const dry = argv.includes('--dry');
   let pairs = flagAll('--set').map(parseSet);
   const jsonPath = flagOne('--json', null);
   if (jsonPath) {
@@ -145,7 +143,6 @@ async function main() {
   for (const t of tagged) {
     const p = pairs.find((x) => x.key === t.key);
     if (t.err) { results.push({ ...t, ok: false }); continue; }
-    if (dry) { results.push({ ...t, ok: true, dry: true }); continue; }
     try {
       await bridge('click', { selector: `[${TAG_ATTR}=${t.tag}]` });
       const r = await bridge('fill', { selector: `[${TAG_ATTR}=${t.tag}]`, value: p.value });
