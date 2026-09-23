@@ -26,7 +26,7 @@ function syntheticValues() {
   values['basic.email'] = 'test@example.com';
   values['basic.currentCity'] = '示例市';
   values['basic.nationality'] = '中国';
-  values['basic.hobbies'] = '<示例爱好>';
+  values['basic.hobbies'] = '示例爱好一、示例爱好二';
   // never 类与紧急联系人：只用来断言它们不进 PDF
   values['basic.idNumber'] = '110101199001011234';
   values['basic.emergencyContactName'] = '某个紧急联系人';
