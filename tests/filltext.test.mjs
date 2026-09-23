@@ -56,20 +56,45 @@ test('pickField：拿到的永远是**本盒内**的控件 —— 标记残留�
   assert.equal(pickField(doc, '获得证书').el.value, '证书值');
 });
 
-test('pickField：同名 label 出现多次时取第一个，且不越盒', () => {
+test('pickField：同名 label 出现多次时按 index 取第 n 行（多行区块靠它定位）', () => {
   const doc = makeDom(`
-    <div class="form-item"><label>学校名称</label><input value="甲公司"></div>
-    <div class="form-item"><label>学校名称</label><input value="乙公司"></div>
+    <div class="form-item"><label>项目名称</label><input value="项目甲"></div>
+    <div class="form-item"><label>项目名称</label><input value="项目乙"></div>
+    <div class="form-item"><label>项目名称</label><input value="项目丙"></div>
   `);
-  assert.equal(pickField(doc, '学校名称').el.value, '甲公司');
+  assert.equal(pickField(doc, '项目名称').el.value, '项目甲');
+  assert.equal(pickField(doc, '项目名称', 2).el.value, '项目乙');
+  assert.equal(pickField(doc, '项目名称', 3).el.value, '项目丙');
 });
 
-test('parseSet：按第一个 = 切；值为空或没写 label 时报 null，不猜', () => {
-  assert.deepEqual(parseSet('外语等级=六级'), ['外语等级', '六级']);
-  assert.deepEqual(parseSet('外语证书/分数=六级（481 分）'), ['外语证书/分数', '六级（481 分）']);
+test('pickField：index 越界报 box-not-found，并回报实际找到几个（不静默取最后一个）', () => {
+  const doc = makeDom('<div class="form-item"><label>项目名称</label><input value="唯一"></div>');
+  const r = pickField(doc, '项目名称', 3);
+  assert.equal(r.err, 'box-not-found');
+  assert.equal(r.n, 1);
+});
+
+test('parseSet：支持 `label#n` 行索引，从 1 起；不带 # 即第 1 行', () => {
+  assert.deepEqual(parseSet('外语等级=六级'), { label: '外语等级', index: 1, value: '六级', key: '外语等级' });
+  const t = parseSet('项目名称#2=LK-99');
+  assert.equal(t.label, '项目名称');
+  assert.equal(t.index, 2);
+  assert.equal(t.value, 'LK-99');
+  assert.equal(t.key, '项目名称#2');
+});
+
+test('parseSet：值里允许出现 # 和 =，按最后一个 #n 与第一个 = 切', () => {
+  const t = parseSet('项目描述#3=第 1 点：A=B，C#4 也算值');
+  assert.equal(t.label, '项目描述');
+  assert.equal(t.index, 3);
+  assert.equal(t.value, '第 1 点：A=B，C#4 也算值');
+});
+
+test('parseSet：缺 label/值/#0 时报 null，不猜', () => {
   assert.equal(parseSet('外语等级'), null);
   assert.equal(parseSet('=六级'), null);
   assert.equal(parseSet('外语等级='), null);
+  assert.equal(parseSet('项目名称#0=甲'), null);
 });
 
 test('tagName：同一 run 内不重名，不同 run 不重名（跨轮次残留不会撞车）', () => {

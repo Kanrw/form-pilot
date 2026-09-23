@@ -52,23 +52,29 @@ export const labelText = (box) => {
 
 // 纯函数：按 label 在盒内定位唯一可见的 input/textarea。有单测（tests/filltext.test.mjs）。
 // doc 只用 querySelectorAll / offsetWidth|offsetHeight，jsdom 里可桩。
-export function pickField(doc, label) {
+// index 从 1 起（与 `__ja` 的 ID 口径、choose.mjs 的 `label#n` 一致）：同名 label 的第 n 个盒子。
+export function pickField(doc, label, index = 1) {
   const items = [...doc.querySelectorAll('.form-item')];
-  const it = items.find((i) => labelText(i) === norm(label));
-  if (!it) return { err: 'box-not-found' };
+  const boxes = items.filter((i) => labelText(i) === norm(label));
+  const it = boxes[index - 1];
+  if (!it) return { err: 'box-not-found', n: boxes.length };
   const ins = [...it.querySelectorAll('input, textarea')].filter((e) => e.offsetWidth || e.offsetHeight);
   if (ins.length === 0) return { err: 'no-visible-input', n: 0 };
   if (ins.length > 1) return { err: 'composite-or-none', n: ins.length };
   return { el: ins[0] };
 }
 
+// '项目名称#2=xxx' → 第 2 行；不带 # 即第 1 行。多行区块（教育/工作/项目）必须靠它定位。
 export function parseSet(arg) {
   const i = String(arg).indexOf('=');
   if (i <= 0) return null;
-  const label = norm(String(arg).slice(0, i));
+  const head = norm(String(arg).slice(0, i));
   const value = String(arg).slice(i + 1);
-  if (!label || !value) return null;
-  return [label, value];
+  const m = head.match(/^(.*?)#(\d+)$/);
+  const label = m ? norm(m[1]) : head;
+  const index = m ? Number(m[2]) : 1;
+  if (!label || !value || !(index >= 1)) return null;
+  return { label, index, value, key: index > 1 ? `${label}#${index}` : label };
 }
 
 // 标记名带一次性前缀：同一进程内不复用，跨进程也不重名（见文件头的三条纪律）
@@ -81,11 +87,18 @@ async function main() {
   const dry = argv.includes('--dry');
   let pairs = flagAll('--set').map(parseSet);
   const jsonPath = flagOne('--json', null);
-  if (jsonPath) pairs = pairs.concat(JSON.parse(readFileSync(jsonPath, 'utf8')));
+  if (jsonPath) {
+    // 兼容两种 json 形态：["label#n", "value"] 或 { label, index, value }
+    const raw = JSON.parse(readFileSync(jsonPath, 'utf8'));
+    for (const r of raw) {
+      if (Array.isArray(r)) pairs.push(parseSet(`${r[0]}=${r[1]}`));
+      else if (r && r.label) pairs.push({ label: norm(r.label), index: r.index || 1, value: String(r.value), key: (r.index || 1) > 1 ? `${r.label}#${r.index}` : r.label });
+    }
+  }
   pairs = pairs.filter(Boolean);
 
   if (!session) { console.log(JSON.stringify({ ok: false, err: 'missing --session' })); process.exit(1); }
-  if (!pairs.length) { console.log(JSON.stringify({ ok: false, err: 'nothing to do: --set "<label>=<value>" or --json <file>' })); process.exit(1); }
+  if (!pairs.length) { console.log(JSON.stringify({ ok: false, err: 'nothing to do: --set "<label>[#n]=<value>" or --json <file>' })); process.exit(1); }
 
   const bridge = async (action, args) => {
     const r = await fetch(BRIDGE, {
@@ -114,14 +127,15 @@ async function main() {
     const items = [...document.querySelectorAll(".form-item")];
     const lab = x => { const l = x.querySelector('label'); const s = l ? norm(l.innerText || l.textContent || '') : ''; const i = s.indexOf(String.fromCharCode(10)); return i < 0 ? s : s.slice(0, i); };
     const out = [];
-    pairs.forEach(([label], i) => {
-      const it = items.find(x => lab(x) === norm(label));
-      if (!it) { out.push({ label, err: 'box-not-found' }); return; }
+    pairs.forEach((p, i) => {
+      const boxes = items.filter(x => lab(x) === norm(p.label));
+      const it = boxes[(p.index || 1) - 1];
+      if (!it) { out.push({ key: p.key, err: 'box-not-found', found: boxes.length }); return; }
       const ins = [...it.querySelectorAll('input, textarea')].filter(e => e.offsetWidth || e.offsetHeight);
-      if (ins.length !== 1) { out.push({ label, err: 'composite-or-none', n: ins.length }); return; }
+      if (ins.length !== 1) { out.push({ key: p.key, err: 'composite-or-none', n: ins.length }); return; }
       const tag = run + i;
       ins[0].setAttribute('${TAG_ATTR}', tag);
-      out.push({ label, tag, before: (ins[0].value || '').slice(0, 60) });
+      out.push({ key: p.key, tag, before: (ins[0].value || '').slice(0, 60) });
     });
     return JSON.stringify(out);
   `);
@@ -129,15 +143,15 @@ async function main() {
   // ③ 写入
   const results = [];
   for (const t of tagged) {
-    const value = pairs.find((p) => p[0] === t.label)[1];
+    const p = pairs.find((x) => x.key === t.key);
     if (t.err) { results.push({ ...t, ok: false }); continue; }
     if (dry) { results.push({ ...t, ok: true, dry: true }); continue; }
     try {
       await bridge('click', { selector: `[${TAG_ATTR}=${t.tag}]` });
-      const r = await bridge('fill', { selector: `[${TAG_ATTR}=${t.tag}]`, value });
-      results.push({ label: t.label, before: t.before, wrote: value.slice(0, 60), ok: !!r.success });
+      const r = await bridge('fill', { selector: `[${TAG_ATTR}=${t.tag}]`, value: p.value });
+      results.push({ key: t.key, before: t.before, wrote: p.value.slice(0, 60), ok: !!r.success });
     } catch (e) {
-      results.push({ label: t.label, ok: false, err: String(e.message).slice(0, 140) });
+      results.push({ key: t.key, ok: false, err: String(e.message).slice(0, 140) });
     }
   }
 
@@ -146,22 +160,23 @@ async function main() {
     const pairs = ${JSON.stringify(pairs)};
     const items = [...document.querySelectorAll('.form-item')];
     const lab = x => { const l = x.querySelector('label'); const s = l ? norm(l.innerText || l.textContent || '') : ''; const i = s.indexOf(String.fromCharCode(10)); return i < 0 ? s : s.slice(0, i); };
-    return JSON.stringify(pairs.map(([label]) => {
-      const it = items.find(x => lab(x) === norm(label));
-      if (!it) return { label, err: 'box-not-found' };
+    return JSON.stringify(pairs.map((p) => {
+      const boxes = items.filter(x => lab(x) === norm(p.label));
+      const it = boxes[(p.index || 1) - 1];
+      if (!it) return { key: p.key, err: 'box-not-found' };
       const ins = [...it.querySelectorAll('input, textarea')].filter(e => e.offsetWidth || e.offsetHeight);
-      return { label, val: ins.length === 1 ? norm(ins[0].value).slice(0, 60) : '(n=' + ins.length + ')' };
+      return { key: p.key, val: ins.length === 1 ? norm(ins[0].value).slice(0, 60) : '(n=' + ins.length + ')' };
     }));
   `);
-  const backMap = new Map(back.map((b) => [b.label, b.val]));
+  const backMap = new Map(back.map((b) => [b.key, b.val]));
 
   // ⑤ 清掉本次标记
   await evalIn(`document.querySelectorAll('[${TAG_ATTR}]').forEach(e => e.removeAttribute('${TAG_ATTR}')); return JSON.stringify({ ok: true });`);
 
   for (const r of results) {
     if (r.err) continue;
-    r.readback = backMap.get(r.label);
-    const want = pairs.find((p) => p[0] === r.label)[1];
+    const want = pairs.find((p) => p.key === r.key).value;
+    r.readback = backMap.get(r.key);
     r.ok = r.readback === norm(want) || (r.readback || '').startsWith(norm(want).slice(0, 40));
   }
   const failed = results.filter((r) => !r.ok);
