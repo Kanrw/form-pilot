@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 必须 ≥22：jsdom 在 Node 20 下直接崩（webidl.util.markAsUncloneable is not a function），
+          # 第一次跑 CI 就是这么红的 —— 4 个 jsdom 测试文件全加载失败。
+          node-version: '22'
       - run: npm ci --no-audit --no-fund
       - run: npm run check:ci

@@ -62,7 +62,7 @@
 git clone https://github.com/Kanrw/form-pilot.git
 cd form-pilot
 npm install          # 只有 jsdom / pdfkit / pdf-parse
-npm test             # 117 个用例，Node ≥18
+npm test             # 121 个用例，Node ≥22（jsdom 在 Node 20 下会崩，见 .github/workflows/privacy.yml）
 ```
 
 ### 1. 建本地档案（一次性）
@@ -142,7 +142,7 @@ node scripts/check-private-leak.mjs --patterns    # ④ 纯模式判据，不需
 
 ## 开发与贡献
 
-- 命令：`npm test`（117 用例）、`npm run check`（测试 + 隐私守卫，提交前必跑）。
+- 命令：`npm test`（121 用例）、`npm run check`（测试 + 隐私守卫，提交前必跑）。
 - 改 `engine/` 后同步更新 `verified` 日期与 CHANGELOG 条目。
 - 纪律见 `AGENTS.md`（给后续维护 AI 的上下文：事实源规则、安全边界、实测记录、双 agent 执行-监督约定）。
 - 上游关系：先独立仓库，后轻量回馈（已在 ASu-skills 开 issue 的思路），不直接提 PR——v2 把"下拉默认人工"改成"AI 默认填"，是设计取向分叉而非 bugfix。
