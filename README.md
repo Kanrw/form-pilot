@@ -95,6 +95,10 @@ node scripts/match.mjs --screen --top 20                      # 硬门槛闸门 
 node scripts/resume-pdf.mjs --version <名>                    # ATS 简历 PDF → private/resume/
 ```
 
+> **不要往已经填过、解析过的表单重传简历。** 很多站点的解析器会重新解析并**覆盖表单里已有的内容**
+> （实测：重传后教育经历被拆成多行、先填好的字段被清掉）。ATS 简历 PDF 是按需工具，不是常规步骤 ——
+> 只在目标表单全空、或你明确要求时才上传。
+
 ---
 
 ## 目录
