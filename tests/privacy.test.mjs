@@ -107,3 +107,34 @@ test('本文件自身不含任何字面量号码（拼接纪律的回归）', as
   const self = readFileSync(new URL(import.meta.url), 'utf8');
   assert.equal(scanTexts([['tests/privacy.test.mjs', self]], null).length, 0);
 });
+
+// ── 守卫的守卫：钩子本身是最容易被"顺手改坏"的地方 ──────────────────────────
+// 这两条都是实测踩出来的，不是预防性臆想：
+//   ① 第一版钩子按 `-f private/profile.json` 判断，档案一改名就悄悄退到弱判据，
+//      严格模式永远没机会跑 —— 在临时克隆里提交被放行才发现的。
+//   ② 钩子的可执行位丢了 git 不会报错，它只是**不再运行** —— 最安静的失效形态。
+
+const HOOKS = ['pre-commit', 'pre-push'];
+
+test('钩子文件存在且带可执行位（丢了 git 不报错，只是静默不跑）', async () => {
+  const { statSync, existsSync } = await import('node:fs');
+  for (const h of HOOKS) {
+    const p = new URL(`../.githooks/${h}`, import.meta.url);
+    assert.ok(existsSync(p), `缺 .githooks/${h}`);
+    assert.ok((statSync(p).mode & 0o111) !== 0, `.githooks/${h} 没有可执行位`);
+  }
+});
+
+test('pre-commit 按 private/ **目录**判断，不是按 profile.json 文件', async () => {
+  const { readFileSync } = await import('node:fs');
+  const sh = readFileSync(new URL('../.githooks/pre-commit', import.meta.url), 'utf8');
+  assert.match(sh, /\[\s+-d private\s+\]/, '缺少 `[ -d private ]` 分支');
+  assert.ok(!/\[\s+-f private\/profile\.json\s+\]/.test(sh),
+    '按 profile.json 文件判断会让"档案被改名"静默退到弱判据，等于废掉失败关闭');
+});
+
+test('pre-commit 无档案时走 --staged --patterns（否则新克隆一个提交都做不了）', async () => {
+  const { readFileSync } = await import('node:fs');
+  const sh = readFileSync(new URL('../.githooks/pre-commit', import.meta.url), 'utf8');
+  assert.match(sh, /--staged --patterns/);
+});
