@@ -25,15 +25,23 @@ const flag = (name, dflt) => {
 
 const session = flag('--session', null);
 const adapter = flag('--adapter', 'auto');
-// ★ 名单必须与 engine/adapters.js 的注册项对齐：漏一个，那个站点就只能靠 auto 碰运气，
-//   显式指定的时候还会报 unknown --adapter（feishu 就漏过一次）。
-const known = ['auto', 'moka', 'beisen', 'feishu', 'generic'];
+// ★ 名单必须与 engine/adapters.js 的注册项**逐一相等**：漏一个，那个站点就只能靠 auto 碰运气，
+//   显式指定时还会报 unknown --adapter（feishu 就漏过一次）。
+//
+// 这里**不再靠注释提醒**（注释挡不住第二次漏），改成由 tests/inject.test.mjs 断言
+// 「KNOWN_ADAPTERS 去掉 auto」与 adapters.js 的注册键集合**双向相等** ——
+// 多一个、少一个都会红。所以本数组被导出，测试直接 import。
+export const KNOWN_ADAPTERS = ['auto', 'moka', 'beisen', 'feishu', 'generic'];
+const known = KNOWN_ADAPTERS;
 
 function out(obj, code) {
   console.log(JSON.stringify(obj));
   process.exit(code);
 }
 
+// 下面这段只在**直接执行本文件**时跑；被 import 时（tests/inject.test.mjs 只为拿
+// KNOWN_ADAPTERS）不得有任何副作用 —— 否则 `out()` 里的 process.exit 会把测试进程带走。
+async function main() {
 if (!session) out({ ok: false, err: 'missing --session' }, 1);
 if (!known.includes(adapter)) out({ ok: false, err: 'unknown --adapter', adapter, known }, 1);
 
@@ -85,3 +93,7 @@ try {
 }
 
 out({ ok: true, ...parsed }, 0);
+}
+
+const invokedDirectly = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop());
+if (invokedDirectly) main();
