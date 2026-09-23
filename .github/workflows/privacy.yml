@@ -1,0 +1,21 @@
+name: privacy
+
+# 服务端这道网是**事后**的（推上去就已经公开了），价值有两个：
+#   1. 万一本地钩子被 --no-verify 绕过或没装（core.hooksPath 未生效），这里会红；
+#   2. 它没有 private/，所以只能跑模式判据 —— 正好验证"无档案也能查"这条路径没坏。
+# 本地钩子才是防线的第一道，别把顺序搞反。
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check:ci

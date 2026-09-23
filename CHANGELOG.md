@@ -26,6 +26,11 @@
 - **ATS 简历 PDF**（`scripts/resume-pdf.mjs`）：按档案生成可解析 PDF，`never` 类字段不进稿
 - **脚本**：`status` / `inject` / `probe` / `capture-fixture` / `profile` / `match` / `resume-pdf`
 - **隐私守卫**：`scripts/check-private-leak.mjs` —— 档案值与单机绝对路径不得进已跟踪文件
+  - 四种模式：默认扫已跟踪文件 / `--staged` 扫暂存区 / `--history` 扫全部历史 /
+    `--patterns` 纯模式判据（不需要档案，CI 用）
+  - `.githooks/pre-commit`（扫暂存区）与 `pre-push`（扫工作树）由 `npm run prepare` 自动装配
+  - `.github/workflows/privacy.yml` 在服务端跑模式判据
+  - **失败关闭**：拿不到 `private/profile.json` 时拒绝对比并退出 1，不再静默放行
 
 ### 变更
 

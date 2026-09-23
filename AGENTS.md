@@ -38,6 +38,44 @@
 - 引擎**不读** `private/`。它只能通过 `fillTexts(map)` 收到"某字段填某值"，
   而 `字段 → 值` 的映射由用户在对话里确认（三道闸门的第一道）。
 
+### ★ 隐私守卫：三层闸门（用户决策，2026-09-23，**最高优先级**）
+
+**为什么是三层**：踩过三次，每次的成因都不同，只加一层挡不住下一种。
+
+| 事故 | 成因 | 现在谁挡它 |
+| --- | --- | --- |
+| 手机号进了 AGENTS.md | 人工看不出真值长什么样 | 按 `private/` 逐值比对（不能只靠正则） |
+| 真值在提交 A 进仓库、提交 B 才从工作树删掉 | **改工作树删不掉历史** | `--history` 模式 |
+| 提交前只跑了 `npm test`，没跑守卫 | 人的记性不是防线 | `.githooks/pre-commit` 强制跑 `--staged` |
+
+**三层闸门 + 一道事后网**：
+
+| 层 | 命令 | 扫什么 | 何时跑 |
+| --- | --- | --- | --- |
+| 1 提交前 | `check-private-leak.mjs --staged` | **暂存区内容**（`git show :<path>`），不是磁盘 | `.githooks/pre-commit` 自动，**过不去就提交不了** |
+| 2 推送前 / 日常 | `check-private-leak.mjs`（默认 tree） | 已跟踪文件 + `private/` 是否被跟踪 | `.githooks/pre-push` 自动 · `npm run check` |
+| 3 事后审计 | `--history` | `git log -p --all` 全部历史，命中会**点名到哪个 SHA** | `npm run check:privacy:history`（人工，推送不跑它） |
+| 网 | `--patterns` | 本机绝对路径 / 手机号 / 身份证号三类模式，**不需要档案** | GitHub Actions（`.github/workflows/privacy.yml`） |
+
+- **第 1 层必须扫 index 而不是工作树**：被 `git add` 之后又在磁盘上改干净的文件，
+  提交进去的仍是脏内容。这是"扫工作树"挡不住的一类绕过，别改回去。
+- **失败关闭**：拿不到 `private/profile.json` 时守卫**拒绝对比对并 exit 1**，不再打印"跳过"。
+  新克隆 / CI 明确用 `--patterns`；确实要跳过必须显式 `--allow-missing-profile`。
+  旧版缺档案时静默放行（fail-open），等于一个重命名就能废掉守卫。
+- **守卫自己被扫**：排除清单现在只有 `package-lock.json`。旧版把守卫自身排除，结果
+  "守卫里写进真值"成了盲区 —— 落地当天就踩到一次（白名单里手滑写了真实手机号，三种模式全没报）。
+- **禁止 `--no-verify`**。钩子是防线不是障碍；要绕过先改这条规则，不要在命令行上偷过。
+  诚实提醒：钩子可以被 `--no-verify` 绕过，所以 GitHub Actions 那道网必须留着。
+- 白名单（`ALLOW` / `ALLOW_PATTERN`）**每条必须写理由**，且 `ALLOW_PATTERN` 有 10 条上界
+  （`tests/privacy.test.mjs` 盯着）。白名单是最容易被顺手放宽的地方，一涨就说明有人在消音。
+- **已知存量（未清）**：`npm run check:privacy:history` 现在会报 3 个已公开的档案值
+  （在 `9ef5bcf` / `fb94263` 两次提交里进的历史）。**重写历史 + force push 清不掉**
+  （GitHub 仍按旧 SHA 提供对象），只有删库重建才能清 —— 所以这条命令在重建前会一直是红的，
+  这是**如实的告警**，不是脚本坏了。别为了让它变绿去加白名单。
+
+钩子安装：`npm install` 会自动跑 `prepare`（`git config core.hooksPath .githooks`）。
+手工装：`npm run prepare`；确认：`git config --get core.hooksPath` 应回 `.githooks`。
+
 ## 二、工作纪律（stop-that-shit · 本项目适用条款）
 
 > 来源：用户级 skill `stop-that-shit`（lennney/stop-that-shit，MIT）。
@@ -132,6 +170,7 @@
   只剩 diff、看不出意图，还会和别的会话的未提交改动混成一个大杂烩 commit。
 - 一个逻辑主题一个 commit。来源不同 / 主题不同的改动必须拆开，哪怕它们同时躺在暂存区里。
 - 提交前跑 **`npm run check`**（= `npm test` + `check-private-leak`），全绿才提交。
+  隐私那半现在有 `.githooks/pre-commit` 自动兜底（见 §一 三层闸门），但**测试那半没人替你跑**。
   **只跑 `npm test` 不够** —— 真值一旦进了 commit，后面再改当前树也**删不掉历史**
   （2026-09-23 实证：`9ef5bcf` 把两个档案值写进 AGENTS，改树是在 `b21e0c5` 才做的，
   历史里那份仍在，且已随本次推送公开）。守卫的检查点必须是**提交前**，不是推送前。
@@ -602,10 +641,12 @@ Moka 旧数据留档（89 字段那次）：解析填对 6 个（≈7%）、填�
 
 **已落盘**：`engine/`（2）、`scripts/`（9：status / inject / probe / capture-fixture / choose /
 profile / match / resume-pdf / check-private-leak）、
-`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（10：engine.test / profile.test /
-jobmatch.test / probe.test / resume-pdf.test / golden.test / choose.test 11 例 + jsdom 桩 + fixture + 人工清单）、
-`docs/`（plans 00–07 + profile-template）。
+`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（11：engine.test / profile.test /
+jobmatch.test / probe.test / resume-pdf.test / golden.test / choose.test / privacy.test +
+jsdom 桩 + fixture + 人工清单）、`docs/`（plans 00–07 + profile-template）。
 **已落盘（2026-09-23 补）**：README / LICENSE(MIT+上游署名) / CHANGELOG。
+**已落盘（2026-09-23 再补，隐私闸门）**：`.githooks/`（pre-commit 扫暂存区、pre-push 扫工作树）、
+`.github/workflows/privacy.yml`（服务端模式判据）。见 §一 三层闸门。
 **尚未**：`skill/` 整个目录、`scripts/sync-skill.mjs`、`docs/guide-v2.md`。
 （三者都在 docs/plans/03 §6/§9 里被当成交付物，仓库里没有——读计划文档时会撞墙，见 CHANGELOG「已知未完成」。）
 
@@ -613,6 +654,10 @@ jobmatch.test / probe.test / resume-pdf.test / golden.test / choose.test 11 例 
 form-pilot/
 ├── README.md / LICENSE(MIT+上游署名) / CHANGELOG.md    ← 已落盘（2026-09-23）
 ├── AGENTS.md / .gitignore / package.json               ← 已落盘
+├── .githooks/            # 隐私闸门第 1、2 层（core.hooksPath 指向这里，npm install 自动装）
+│   ├── pre-commit        #   --staged：扫暂存区内容，过不去就提交不了
+│   └── pre-push          #   默认 tree：工作树 + private/ 跟踪检查
+├── .github/workflows/    # 隐私闸门的事后网：privacy.yml 跑 --patterns（无档案也能查）
 ├── engine/               # 代码唯一事实源
 │   ├── engine.js         # 单文件IIFE，挂 window.__ja
 │   └── adapters.js       # IIFE幂等挂载 window.__jaAdapters（含 verified 日期）

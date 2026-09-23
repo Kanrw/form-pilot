@@ -1,0 +1,13 @@
+#!/bin/sh
+# 隐私守卫（推送前）。工作树 + private/ 跟踪检查。
+#
+# 提交是本地动作，推送是**不可逆**动作（推上去那刻就等于公开）。
+# 历史审计是单独一条命令，不放在这里 —— 它现在会报已知的脏历史，挂在这里会把推送永久堵死：
+#   npm run check:privacy:history
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-push: 找不到 node，无法跑隐私守卫 —— 拒绝推送（失败关闭）。" >&2
+  exit 1
+fi
+
+exec node scripts/check-private-leak.mjs

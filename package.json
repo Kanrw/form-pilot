@@ -15,7 +15,11 @@
   },
   "scripts": {
     "test": "node --test",
+    "prepare": "git config core.hooksPath .githooks || true",
     "check:privacy": "node scripts/check-private-leak.mjs",
+    "check:privacy:staged": "node scripts/check-private-leak.mjs --staged",
+    "check:privacy:history": "node scripts/check-private-leak.mjs --history",
+    "check:ci": "npm test && node scripts/check-private-leak.mjs --patterns",
     "check": "npm test && npm run check:privacy"
   },
   "devDependencies": {

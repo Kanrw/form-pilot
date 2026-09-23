@@ -62,7 +62,7 @@
 git clone https://github.com/Kanrw/form-pilot.git
 cd form-pilot
 npm install          # 只有 jsdom / pdfkit / pdf-parse
-npm test             # 93 个用例，Node ≥18
+npm test             # 117 个用例，Node ≥18
 ```
 
 ### 1. 建本地档案（一次性）
@@ -116,12 +116,22 @@ node scripts/resume-pdf.mjs --version <名>                    # ATS 简历 PDF 
 ## 隐私边界（硬规则）
 
 - `private/` 被 `.gitignore` 挡住；`tests/fixtures/raw/`（真实页面 HTML）同样不入库，人工脱敏后才移入 `tests/fixtures/`。
-- 但档案值会被**抄进**测试、schema 提示语、实测记录——所以有守卫：
+- 但档案值会被**抄进**测试、schema 提示语、实测记录——所以有守卫，三层：
 
 ```bash
-node scripts/check-private-leak.mjs   # 档案值或 /Users/<用户名> 出现在已跟踪文件里 → 退出码 1
+node scripts/check-private-leak.mjs               # ① 已跟踪文件 + private/ 是否被跟踪
+node scripts/check-private-leak.mjs --staged      # ② 暂存区内容（提交前扫的是这个，不是磁盘）
+node scripts/check-private-leak.mjs --history     # ③ 全部 git 历史，命中会点名到哪个 SHA
+node scripts/check-private-leak.mjs --patterns    # ④ 纯模式判据，不需要 private/（CI 用）
 ```
 
+- ① 和 ② 由 `.githooks/` 里的钩子**自动跑**（`npm install` 会执行 `npm run prepare` 装上；
+  确认：`git config --get core.hooksPath` 应回 `.githooks`）。**不要用 `--no-verify` 绕过。**
+- **为什么 ② 要扫暂存区而不是磁盘**：被 `git add` 之后又在磁盘上改干净的文件，提交进去的仍是脏内容。
+- **为什么 ③ 存在**：真值一旦进了 commit，**改工作树删不掉历史**，重写历史 + force push 也清不掉
+  （GitHub 仍按旧 SHA 提供对象）。唯一彻底的做法是删库重建。
+- **为什么 ④ 存在**：它能证明自己没坏的前提是"没有档案也能查"（本机路径 / 手机号 / 身份证号三类模式）。
+- 守卫**失败关闭**：拿不到 `private/profile.json` 时拒绝放行（exit 1），不会假装通过。
 - 脚本的 stdout 只回计数与路径，**不回档案值**（终端回滚缓冲与对话都是泄密面）。
 - PDF / 档案读写有路径守卫，拒绝写到 `private/` 之外。
 
@@ -129,7 +139,7 @@ node scripts/check-private-leak.mjs   # 档案值或 /Users/<用户名> 出现�
 
 ## 开发与贡献
 
-- 命令：`npm test`（93 用例）、`npm run check:privacy`。
+- 命令：`npm test`（117 用例）、`npm run check`（测试 + 隐私守卫，提交前必跑）。
 - 改 `engine/` 后同步更新 `verified` 日期与 CHANGELOG 条目。
 - 纪律见 `AGENTS.md`（给后续维护 AI 的上下文：事实源规则、安全边界、实测记录、双 agent 执行-监督约定）。
 - 上游关系：先独立仓库，后轻量回馈（已在 ASu-skills 开 issue 的思路），不直接提 PR——v2 把"下拉默认人工"改成"AI 默认填"，是设计取向分叉而非 bugfix。
