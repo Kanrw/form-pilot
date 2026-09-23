@@ -2,7 +2,7 @@
 
 > 本文件只记录已发生的事实与决定，不含新规划。后续 agent 请基于此文档继续执行。
 > **§二 工作纪律优先于任何规划文档的"顺带做掉"倾向**；冲突时以 §二 为准。
-> 最后更新：2026-09-22
+> 最后更新：2026-09-23
 
 ## 一、项目身份
 
@@ -104,6 +104,29 @@
 
 结果存在 ＋ 所需证据支撑 ＋ 无已知范围内阻塞 ＝ 完成。
 **不要再加一轮审计循环来"满足纪律"**；复验要复用仍然有效的证据，不重复已通过的检查。
+
+### 2.8 双 agent 执行-监督（用户决策，2026-09-23）
+
+- 现场执行类任务（表单填写、桥接会话等有卡死/循环风险的实操）**必须双 agent**：一个执行，一个监督。
+  根因：执行者自己监工自己，轮次必然失控（2026-09-23 北森会话实测：同参数重试 3 次、payload 混用、
+  heredoc 变体踩坑，全部无外部否决点）。
+- 执行者每步向监督者发 ≤3 行状态（动作 / 结果 / 计数）；监督者只在违规或预算到点时发声，沉默 = 放行。
+- 监督者四条红线，触发即强制叫停，执行者不得以"再试一次"抗辩：
+  1. 同一类失败第 3 次 → 预警；第 6 次 → 强制跳过归类（manual / 待手动）；
+  2. 同一探测读数连续 3 次不变 → 判卡死，换路径或归类；
+  3. 同参数重试同一失败动作最多 2 次，第 3 次禁止；
+  4. 会话总预算 5 分钟，到点强制收尾出三清单（已填 / 待手动 / 待确认）。
+- 监督者不可用时，执行者降级为自带计数器（红线 1/3/4 仍生效）——监督是加强，不是单点依赖。
+- 纯文档 / 代码任务不强制双 agent：无卡死风险，加了反而违背 §2 的限时哲学。
+
+### 2.9 改动即提交（用户决策，2026-09-23）
+
+- **一处改动完成就提交 git**，不攒到"告一段落"。理由是多会话接力：未提交的工作区在下一会话
+  只剩 diff、看不出意图，还会和别的会话的未提交改动混成一个大杂烩 commit。
+- 一个逻辑主题一个 commit。来源不同 / 主题不同的改动必须拆开，哪怕它们同时躺在暂存区里。
+- 提交前跑 `npm test`，绿的才提交。
+- 提交 ≠ 推送，默认只落本地。推送是另一个动作，且推送前必须验
+  `git ls-files | grep -E '^private/'` 输出为空（见 §一 隐私边界）。
 
 ## 三、已完成的工作
 
@@ -508,9 +531,9 @@ Moka 旧数据留档（89 字段那次）：解析填对 6 个（≈7%）、填�
 
 ## 九、项目结构
 
-**已落盘**：`engine/`（2）、`scripts/`（4：status / inject / capture-fixture / profile）、
-`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（5：engine.test 11 例、profile.test 34 例、
-jsdom 桩、fixture、人工清单）、`docs/`（plans 00–06 + profile-template）。
+**已落盘**：`engine/`（2）、`scripts/`（6：status / inject / capture-fixture / profile / match / resume-pdf）、
+`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（6：engine.test 11 例、profile.test 34 例、
+jobmatch.test、probe.test、resume-pdf.test 6 例、jsdom 桩、fixture、人工清单）、`docs/`（plans 00–06 + profile-template）。
 **尚未**（Phase 3）：`skill/` 整个目录、`scripts/sync-skill.mjs`、README / LICENSE / CHANGELOG、
 `docs/guide-v2.md`。
 
@@ -538,6 +561,8 @@ form-pilot/
 │   ├── inject.mjs        # 读engine+adapters拼字符串，POST一次evaluate
 │   ├── capture-fixture.mjs  # 抓当前页表单outerHTML
 │   ├── profile.mjs       # 档案 CLI（--init/--import/--check/--render/--versions）+ --ui 本地服务
+│   ├── match.mjs         # jobmatch CLI（--fetch/--screen/--sites）
+│   ├── resume-pdf.mjs    # ATS 简历 PDF 生成（见 §十三）
 │   └── sync-skill.mjs    # engine/ → skill/references/ → ~/.config（单向，含GENERATED头）  ← Phase 3，未落盘
 ├── tests/
 │   ├── engine.test.mjs   # node:test + jsdom，11 例
@@ -666,3 +691,31 @@ Node 22 把路径参数当模块加载，报 `Cannot find module '…/tests'`。
 - 列表接口不含岗位详情页 URL，`/position/<id>/` 实测是 404 页 → `url` 留空，不猜拼法；
   交接靠岗位 `id` + 在页面上打开。
 - 词典只来自档案自己写下的词。档案没写的技能不会凭空命中，这是刻意的。
+
+## 十三、ATS 简历 PDF 模组（2026-09-22 落地）
+
+独立于引擎的档案侧模组。背景：多数招聘网站支持「上传简历 → 自动解析 → 回填表单」，
+比逐字段灌网页可靠；面向 HR 的排版简历压缩字段导致解析失败，所以生成一份
+**完整、未压缩、机器可读**的版本供上传。
+
+| 文件 | 职责 |
+| --- | --- |
+| `scripts/resume-pdf.mjs` | CLI：`node scripts/resume-pdf.mjs [--version <名>] [--font <ttf/ttc>] [--versions]` |
+| `tests/resume-pdf.test.mjs` | node:test 6 例：组装齐全 / 四类排除 / 空姓名报错 / 空区段不出标题 / PDF 抽回比对 / 路径守卫 |
+
+产出 `private/resume/resume-ats.pdf`（投放版本口径为 `resume-ats-<名>.pdf`，复用
+`resolveValues` 的基准 ⊕ 覆盖）。依赖：`pdfkit`（运行时生成）+ `pdf-parse`（devDep，测试抽回比对）。
+
+**版式决定**：单栏纯文本流，无表格 / 图片 / 分栏 / 页眉页脚；区段标题用 schema 区段标签；
+每个字段都带「标签：值」；日期保持档案原值不缩写；页眉两行放 ATS 高频字段
+（性别 / 出生日期 / 政治面貌 / 现居住城市；电话 / 邮箱 / GitHub / ORCID）。
+中文必须内嵌带 ToUnicode 的 CJK 字体才能被抽出 —— 候选字体逐个试开
+（本机实测 Hiragino / PingFang 的 TTC 未过探测，落到 Arial Unicode.ttf），全败时报错要求 `--font`。
+
+**整段排除（显式决定，不是遗漏）**：never 类（证件号码）、紧急联系人（第三方个人信息）、
+常见长文本答案（表单答案不是简历内容）、附件清单（本机路径）。
+教育条目头行把 `degree + programType` 合并显示；描述 / 成果保留逐行编号原样。
+
+**验收（2026-09-22）**：`npm test` 88/88；真实档案 152 个非空值（排除上述四类后）逐一比对，
+抽回文本 152/152 命中；空区段（实习 / 工作经历）不出标题。输出强制 `<root>/private/` 内，
+stdout 只回路径与计数、不回显字段值。
