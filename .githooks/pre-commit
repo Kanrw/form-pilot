@@ -4,7 +4,13 @@
 # 为什么要钩子：2026-09-23 的真实事故是"提交前只跑了 npm test，没跑守卫"，
 # 真值就此进了仓库历史 —— 改工作树删不掉历史。人的记性不是防线，钩子是。
 #
-# 禁止 --no-verify 绕过（AGENTS §一）。守卫拿不到判据时会**失败关闭**，不会静默放行。
+# 禁止 --no-verify 绕过（AGENTS §一）。
+#
+# 判据分两种，取决于 private/ **目录**在不在：
+#   在  → 按档案值逐条比对（最强），这是主 checkout 的常态；
+#   不在（新克隆 / 贡献者机器）→ 降级为模式判据，否则谁都提交不了。
+#   private/ 在但档案读不出来时，脚本自己会失败关闭 —— 那种"本以为有、其实没读到"
+#   才是最危险的，必须拦死，不能在这里兜底放行。
 
 if ! command -v node >/dev/null 2>&1; then
   echo "pre-commit: 找不到 node，无法跑隐私守卫 —— 拒绝提交（失败关闭）。" >&2
@@ -12,4 +18,9 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-exec node scripts/check-private-leak.mjs --staged
+if [ -f private/profile.json ]; then
+  exec node scripts/check-private-leak.mjs --staged
+fi
+
+echo "pre-commit: 本 checkout 没有 private/profile.json —— 退回模式判据（本机路径 / 手机号 / 身份证号）。" >&2
+exec node scripts/check-private-leak.mjs --staged --patterns

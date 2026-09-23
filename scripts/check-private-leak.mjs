@@ -2,11 +2,19 @@
 // 隐私边界守卫：档案真值不许进 git（工作树 / 暂存区 / 历史 三个面都扫）。
 //
 // 用法：
-//   node scripts/check-private-leak.mjs                  # 已跟踪文件（工作树）← 默认，npm run check:privacy
-//   node scripts/check-private-leak.mjs --staged         # 暂存区内容 ← pre-commit 钩子用
-//   node scripts/check-private-leak.mjs --history        # 全部 git 历史 ← 事后审计，npm run check:privacy:history
-//   node scripts/check-private-leak.mjs --patterns       # 纯模式匹配，不需要 private/ ← CI 用，npm run check:ci
-//   node scripts/check-private-leak.mjs --allow-missing-profile   # 显式承认没档案（默认**失败关闭**）
+//   node scripts/check-private-leak.mjs                  # 扫已跟踪文件（工作树）← 默认，npm run check:privacy
+//   node scripts/check-private-leak.mjs --staged         # 扫暂存区内容 ← pre-commit 钩子用
+//   node scripts/check-private-leak.mjs --history        # 扫全部 git 历史 ← 事后审计，npm run check:privacy:history
+//   node scripts/check-private-leak.mjs --patterns       # 只跑模式判据，不要求 private/ ← CI / 新克隆
+//
+// **扫描范围与判据是两维**（--staged/--history 是范围，--patterns 是判据），可以叠加：
+//   --staged --patterns  = 扫暂存区、只跑模式判据（新克隆的 pre-commit 走这条）
+//   --patterns 单独用    = 扫工作树、只跑模式判据（CI 走这条）
+// 早先把 --patterns 写成第三种"范围"是错的：这样新克隆里 pre-commit 永远拿不到判据，
+// 只能要么失败关闭把人全堵死、要么放行 —— 两个都不对。
+//
+// 失败关闭（**只对"本该有档案却没有"生效**，见 main()）：private/ 目录在但档案读不出来 →
+// 拒绝放行；private/ 目录根本不存在（新克隆 / 贡献者）→ 降级为模式判据并明确告警。
 //
 // 为什么要有它：private/ 被 .gitignore 挡住，但档案值会被**抄进**测试、schema 提示、
 // AGENTS.md 的实测记录里 —— 那些文件要进 git、要公开分发。人工看不出来，机器能。
@@ -24,9 +32,10 @@
 //   C. 任何 private/ 下的路径不得被 git 跟踪（这是最直接的违规形态）。
 // 宁可误报（人工加白名单并写明理由），不可漏报 —— 漏报等于把手机号推到公网。
 //
-// 失败关闭：拿不到 private/profile.json 时**直接退出 1**，除非显式 --allow-missing-profile
-// 或走 --patterns。旧版在缺档案时打印"跳过"并 exit 0 —— 那是 fail-open，等于守卫可以被
-// 一个重命名绕过，已删除。
+// 失败关闭：**只对"本该有档案却没有"生效**。
+// 区分信号是 private/ **目录**而不是文件：目录在而档案读不出来（改名/误删）→ 拒绝放行；
+// 目录根本不在（新克隆、贡献者机器）→ 降级成模式判据并告警，否则谁都没法提交。
+// 旧版把这两种情况混成一句"跳过并 exit 0" —— 那是 fail-open，一个重命名就能废掉守卫。
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,10 +44,10 @@ import { execFileSync } from 'node:child_process';
 const ROOT = new URL('..', import.meta.url).pathname;
 
 const argv = new Set(process.argv.slice(2));
-const MODE = argv.has('--history') ? 'history'
-  : argv.has('--staged') ? 'staged'
-    : argv.has('--patterns') ? 'patterns'
-      : 'tree';
+// 范围
+const SCOPE = argv.has('--history') ? 'history' : argv.has('--staged') ? 'staged' : 'tree';
+// 判据：--patterns 表示"不要求 private/"，与范围正交
+const NO_PROFILE = argv.has('--patterns');
 const ALLOW_MISSING = argv.has('--allow-missing-profile');
 
 // ★ 守卫自己也必须被扫（2026-09-23）。旧版把本文件排除在扫描之外，理由说不清；
@@ -181,54 +190,63 @@ function historyEntries() {
   return entries;
 }
 
-export function collectEntries(mode) {
-  return mode === 'history' ? historyEntries() : mode === 'staged' ? stagedEntries() : treeEntries();
+export function collectEntries(scope) {
+  return scope === 'history' ? historyEntries() : scope === 'staged' ? stagedEntries() : treeEntries();
 }
 
 function main() {
-  const needValues = MODE !== 'patterns';
+  const needValues = !NO_PROFILE;
   const values = needValues ? collectPrivateValues() : null;
   if (needValues && !values && !ALLOW_MISSING) {
-    console.error('check-private-leak: 拒绝放行 —— 拿不到 private/profile.json，无法按档案值比对。');
-    console.error('  这是**失败关闭**，不是错误：守卫在拿不到判据时不许假装通过。');
-    console.error('  新克隆 / CI 请用:  node scripts/check-private-leak.mjs --patterns');
-    console.error('  确实要在此机器上跳过:  node scripts/check-private-leak.mjs --allow-missing-profile');
-    process.exit(1);
+    const hasPrivateDir = existsSync(join(ROOT, 'private'));
+    if (hasPrivateDir) {
+      // 本该有档案却没有 → 拒绝放行。这是防"改名/误删掉档案让守卫静默失效"。
+      console.error('check-private-leak: 拒绝放行 —— private/ 目录在，但读不出 profile.json。');
+      console.error('  这是**失败关闭**，不是错误：档案本该在这里，读不出来就得先查清楚。');
+      console.error('  查因：private/profile.json 是否被改名/删掉/写成坏 JSON？');
+      console.error('  确实要在此机器上跳过:  --allow-missing-profile');
+      process.exit(1);
+    }
+    // private/ 根本不存在（新克隆 / 贡献者机器）→ 降级为模式判据，但把话说明白。
+    console.error('check-private-leak: 本 checkout 没有 private/（新克隆或贡献者机器）——');
+    console.error('  按档案值逐条比对做不了，降级为模式判据（本机路径 / 手机号 / 身份证号）。');
+    console.error('  这只覆盖三类可模式化的数据；**你自己有档案时请在本机主 checkout 下提交**。');
   }
 
   let entries;
   try {
-    entries = collectEntries(MODE);
+    entries = collectEntries(SCOPE);
   } catch (e) {
     console.error(`check-private-leak: 取数失败（git 命令出错）: ${String(e.message).slice(0, 200)}`);
     process.exit(1);
   }
 
   const leaks = scanTexts(entries, values);
-  if ((MODE === 'tree' || MODE === 'staged') ) {
+  if (SCOPE === 'tree' || SCOPE === 'staged') {
     for (const p of trackedPrivatePaths()) {
       leaks.push({ kind: 'private/被跟踪', val: p, keys: '', where: 'git ls-files' });
     }
   }
 
-  const scope = MODE === 'history' ? `${entries.length} 个提交的 patch`
-    : MODE === 'staged' ? `${entries.length} 个暂存文件`
+  const scope = SCOPE === 'history' ? `${entries.length} 个提交的 patch`
+    : SCOPE === 'staged' ? `${entries.length} 个暂存文件`
       : `${entries.length} 个已跟踪文件`;
   const judge = values ? `${values.size} 个档案值 + ${PATTERNS.length} 类模式` : `${PATTERNS.length} 类模式（无档案）`;
+  const tag = `${SCOPE}${NO_PROFILE ? '/patterns' : ''}`;
 
   if (leaks.length === 0) {
-    console.log(`check-private-leak[${MODE}]: 干净（${judge} × ${scope}）。`);
+    console.log(`check-private-leak[${tag}]: 干净（${judge} × ${scope}）。`);
     return 0;
   }
 
-  console.error(`check-private-leak[${MODE}]: 发现 ${leaks.length} 处泄漏，禁止继续：`);
+  console.error(`check-private-leak[${tag}]: 发现 ${leaks.length} 处泄漏，禁止继续：`);
   for (const l of leaks) console.error(`  [${l.kind}] ${JSON.stringify(l.val)}  ← ${l.where}${l.keys ? '  (' + l.keys + ')' : ''}`);
-  if (MODE === 'history') {
+  if (SCOPE === 'history') {
     console.error('');
     console.error('  历史里的值**删不掉**：重写历史 + force push 也不管用，GitHub 仍按旧 SHA 提供对象。');
     console.error('  彻底处理只有删库重建；否则请把这几条当成已公开处理。');
   }
-  if (MODE === 'staged') {
+  if (SCOPE === 'staged') {
     console.error('');
     console.error('  这是 pre-commit 钩子拦下的。修法：把真值换成泛称/示例值，重新 git add。');
     console.error('  禁止用 --no-verify 绕过（AGENTS §一）。');
