@@ -73,10 +73,19 @@
   诚实提醒：钩子可以被 `--no-verify` 绕过，所以 GitHub Actions 那道网必须留着。
 - 白名单（`ALLOW` / `ALLOW_PATTERN`）**每条必须写理由**，且 `ALLOW_PATTERN` 有 10 条上界
   （`tests/privacy.test.mjs` 盯着）。白名单是最容易被顺手放宽的地方，一涨就说明有人在消音。
-- **已知存量（未清）**：`npm run check:privacy:history` 现在会报 3 个已公开的档案值
-  （在 `9ef5bcf` / `fb94263` 两次提交里进的历史）。**重写历史 + force push 清不掉**
-  （GitHub 仍按旧 SHA 提供对象），只有删库重建才能清 —— 所以这条命令在重建前会一直是红的，
-  这是**如实的告警**，不是脚本坏了。别为了让它变绿去加白名单。
+- **已清（2026-09-23 删库重建）**：`npm run check:privacy:history` **现在是干净的**。
+  曾经的 3 个已公开档案值走了这条完整路径：改工作树无效 → 重写历史 + force push 也清不掉
+  （GitHub 仍按旧 SHA 提供对象）→ **只有删库重建能清**。这次执行的是：
+  用户网页删库 → 本地 `filter-branch` 把三个值替换为泛称 → 删掉陈旧的 `origin/main`
+  （它是改写后唯一还能走到旧提交的引用）→ reflog expire + `gc --prune=now` → 复核远端 404。
+  **代价：全部 SHA 变了**，所以本文件里任何旧 SHA 引用都不再存在（已按此清理）。
+  以后再出现"历史脏了"，照这条路径走，不要指望 rewrite + force push。
+- **重建时顺手做的两件（2026-09-23）**：① 提交身份从个人邮箱改为
+  `105688024+Kanrw@users.noreply.github.com`（**只设在 repo-local config**，因为全局改会波及
+  使用者的其它仓库；新克隆不会继承，所以新克隆里提交会用全局邮箱 —— 别忘了）；
+  ② 历史里的 `.DS_Store` 一并清掉。**唯一的本地残留**是 WorkBuddy 自己的会话检查点引用
+  （`refs/agents/<session>/checkpoints/turn/*`）仍持有那两个 blob —— 那是工具状态、不在推送范围，
+  故未动（要清就 `git update-ref -d` 那两个引用后 gc，代价是丢该会话的检查点）。
 
 钩子安装：`npm install` 会自动跑 `prepare`（`git config core.hooksPath .githooks`）。
 手工装：`npm run prepare`；确认：`git config --get core.hooksPath` 应回 `.githooks`。
@@ -177,8 +186,9 @@
 - 提交前跑 **`npm run check`**（= `npm test` + `check-private-leak`），全绿才提交。
   隐私那半现在有 `.githooks/pre-commit` 自动兜底（见 §一 三层闸门），但**测试那半没人替你跑**。
   **只跑 `npm test` 不够** —— 真值一旦进了 commit，后面再改当前树也**删不掉历史**
-  （2026-09-23 实证：`9ef5bcf` 把两个档案值写进 AGENTS，改树是在 `b21e0c5` 才做的，
-  历史里那份仍在，且已随本次推送公开）。守卫的检查点必须是**提交前**，不是推送前。
+  （2026-09-23 实证：有一次把两个档案值写进 AGENTS，隔一个提交才从工作树改掉，
+  历史里那份仍在，并随推送公开；最终只能靠删库重建清掉，见 §一）。
+  守卫的检查点必须是**提交前**，不是推送前。
 - 提交 ≠ 推送，默认只落本地。推送是另一个动作，且推送前必须验
   `git ls-files | grep -E '^private/'` 输出为空（见 §一 隐私边界）。
 
