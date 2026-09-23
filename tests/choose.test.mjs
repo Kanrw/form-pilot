@@ -11,7 +11,7 @@ import { norm, parseTarget, parseSet, matchOption } from '../scripts/choose.mjs'
 
 test('norm：折叠空白并去首尾', () => {
   assert.equal(norm('  未婚 \n'), '未婚');
-  assert.equal(norm('示例大学\t物理学'), '示例大学 物理学');
+  assert.equal(norm('示例大学\t示例专业'), '示例大学 示例专业');
   assert.equal(norm(null), '');
   assert.equal(norm(undefined), '');
 });
