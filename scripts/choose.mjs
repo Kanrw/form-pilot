@@ -69,7 +69,11 @@ export const parseSet = (arg) => {
 // 选项匹配：精确 → 去括号/去空格后的精确 → 唯一包含。
 // 不做"猜一个"：多个候选命中同一档就报 ambiguous，宁可人工点。
 export const matchOption = (texts, value) => {
-  const list = texts.map((t) => ({ raw: t, t: norm(t) }));
+  // ★ 空文本不是选项，必须在这里剔掉（独立审计 2026-09-23 抓出）：
+  //   包含分支是双向的 `x.t.includes(v) || v.includes(x.t)`，而 `v.includes('')` **恒真** ——
+  //   面板里只要混进一个空节点（间隔/占位 div 很常见），它就会被判成"包含命中"，
+  //   把唯一命中变成 ambiguous（多个空节点时）或者错选空文本。
+  const list = texts.map((t) => ({ raw: t, t: norm(t) })).filter((x) => x.t);
   const v = norm(value);
   const exact = list.filter((x) => x.t === v);
   if (exact.length === 1) return { raw: exact[0].raw, how: 'exact' };
@@ -267,7 +271,7 @@ async function chooseOne({ label, index, value }) {
   return {
     field: key, value,
     ok, verifiedBy: 'display', display,
-    ...(ok ? { how: pick.how, ...(pick.nodes > 1 ? { nodes: pick.nodes } : {}) } : { err: 'display-not-updated', options: (pick.options || []).slice(0, 20) }),
+    ...(ok ? { how: pick.how } : { err: 'display-not-updated', options: (pick.options || []).slice(0, 20) }),
   };
 }
 

@@ -122,3 +122,21 @@ test('chooseCandidate：多个候选同等包含 → ambiguous', () => {
   const r = chooseCandidate(cands('英语四级', '英语六级'), '英语');
   assert.equal(r.err, 'option-ambiguous');
 });
+
+// 独立审计（2026-09-23）抓出的边界：空文本候选必须被剔除。
+// 包含分支是双向的 `x.t.includes(v) || v.includes(x.t)`，`v.includes('')` 恒真 ——
+// 面板里混进一个空节点（间隔/占位 div）就会把唯一命中变成 ambiguous 或错选空文本。
+test('matchOption：空文本候选要被剔除，不能靠"v.includes(空串)恒真"混进命中', () => {
+  const r = matchOption(['', '英语四级'], '英语');
+  assert.equal(r.how, 'contains');
+  assert.equal(r.raw, '英语四级');
+});
+
+test('matchOption：全是空文本时算 none，不是命中', () => {
+  assert.equal(matchOption(['', '   ', '\n'], '英语').how, 'none');
+});
+
+test('chooseCandidate：候选里混有空节点时仍能唯一命中', () => {
+  const r = chooseCandidate(cands('', '英语四级', '日语'), '英语');
+  assert.equal(r.tag, 'x1');
+});
