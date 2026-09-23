@@ -35,6 +35,8 @@
 
 - 计划中的 `skill/`（opencode 技能包）与 `scripts/sync-skill.mjs` 尚未落地；
   目前通过 `scripts/inject.mjs` 直接使用 `engine/`
+- `docs/guide-v2.md`（用户指南）尚未落地；`docs/plans/03` 与 AGENTS.md §九 里仍把它当交付物引用
+- 飞书站的月区间日期与「期望工作地点」在 L3 实测中跳过；`pickOption` 在该站会复发 `menu-not-open`
 - 菜单出现时序、portal、`isTrusted` 降级不在 jsdom 覆盖范围内，见 `tests/manual-e2e.md`
 
 ### 署名

@@ -542,12 +542,13 @@ Moka 旧数据留档（89 字段那次）：解析填对 6 个（≈7%）、填�
 **已落盘**：`engine/`（2）、`scripts/`（6：status / inject / capture-fixture / profile / match / resume-pdf）、
 `tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（6：engine.test 11 例、profile.test 34 例、
 jobmatch.test、probe.test、resume-pdf.test 6 例、jsdom 桩、fixture、人工清单）、`docs/`（plans 00–06 + profile-template）。
-**尚未**（Phase 3）：`skill/` 整个目录、`scripts/sync-skill.mjs`、README / LICENSE / CHANGELOG、
-`docs/guide-v2.md`。
+**已落盘（2026-09-23 补）**：README / LICENSE(MIT+上游署名) / CHANGELOG。
+**尚未**：`skill/` 整个目录、`scripts/sync-skill.mjs`、`docs/guide-v2.md`。
+（三者都在 docs/plans/03 §6/§9 里被当成交付物，仓库里没有——读计划文档时会撞墙，见 CHANGELOG「已知未完成」。）
 
 ```
 form-pilot/
-├── README.md / LICENSE(MIT+上游署名) / CHANGELOG.md    ← Phase 3，未落盘
+├── README.md / LICENSE(MIT+上游署名) / CHANGELOG.md    ← 已落盘（2026-09-23）
 ├── AGENTS.md / .gitignore / package.json               ← 已落盘
 ├── engine/               # 代码唯一事实源
 │   ├── engine.js         # 单文件IIFE，挂 window.__ja
