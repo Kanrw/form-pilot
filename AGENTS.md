@@ -352,12 +352,20 @@ blockSections    edu 教育背景 / intern 实习经历 / proj 项目经验 / sc
   pointer/mouse 五件套（点 input、点 `.phoenix-select__switchArrow` 都不开菜单）。
   区域级联面板（`common-unmodeled-layer` + `area-text-label`）能开但点击只是导航，
   勾选控件是行内 SVG 图标（`area-icon-RadioUnchecked`），同样点不动。
-  **结论**：北森选择类字段现阶段一律 manual，不要在会话里反复重试同类通道；
-  下一步值得试的只有 `getEventListeners()` 查真实绑定位置 / 组件 state 直调，见 §2.4 R3 余项。
+- **★ 上述结论已被推翻（2026-09-23，方正 PCB `founderpcb.zhiye.com`）**：不是控件免疫，
+  是**那 25 轮尝试全打在视口外的坐标上**。实测那个触发器 `getBoundingClientRect().y = -1288`
+  （页面根本没滚到它）。唯一有效的通道就是**扩展的真实坐标点击**，顺序为：
+  `scrollIntoView({block:'center'})` → 桥 `click` 触发器 → 菜单**正常打开**
+  （选项是 `.phoenix-selectList__listItem`，面板可能挂在 portal 上，得按"出现在触发器正下方"
+  做 rect 就近过滤）→ 再桥 `click` 选项 → 应用侧 display 更新。**单场 9 个单选 8 中。**
+  落地成 `scripts/choose.mjs`（驱动层，见 §六 末）。**页内合成事件仍然无效**，别回去试。
+- **仍未攻克：多选**（选项里有「全选」、面板底部有 `.phoenix-button` 的「确定」）。实测
+  点选项 + 点确定后应用侧 display 仍是「请选择」（盒内也没有 chip 出现），2 次尝试后按
+  §2.8 红线放弃，归 manual。下一步该看 `.phoenix-selectList__listItem` 内部的勾选控件是什么节点。
 - **站内简历解析器是最大的填充者**：上传 PDF 后自动带入约 60% 字段（姓名/性别/手机/教育三段/
   项目一/技能名与掌握程度/证书区骨架）。引擎的增量价值在解析器不覆盖的部分：
   专业名称 ×3、实习区、加行后的 3 个项目组、全部技能描述——fillTexts 一次调用全中。
-  **每个站点的 L3 第一步都是先传简历、等解析、再 rescan**（本页 53→68 个字段）。
+  **旧口径"每个站点的 L3 第一步都是先传简历、等解析、再 rescan"已作废**，见 §七 的默认不填规则。
 - **教育段的港大交换（开始 2024-01）结束时间待使用者确认**，档案无此值，未瞎填。
 
 ## 六、引擎 API
@@ -472,6 +480,26 @@ __ja.fillMonthRange(id, from, to)              → {ok,from,to,picks,assumed?,di
 - **文件上传不经引擎**：JS 拿不到 File 对象，走桥的 `upload` 动作，引擎不提供上传接口。
 - `scan`/`readAll` **没有分页参数**（§2.4 已删）。返回值超限再说。
 
+### 选择类字段的驱动：`scripts/choose.mjs`（2026-09-23）
+
+R3 `setChoice` 的触发条件（北森实际投入使用）已在方正 PCB 的真实投递中满足，但它**没有**落地成
+`__ja.setChoice`，而是落在驱动层 —— 有效通道是扩展的真实坐标点击，页内拿不到。这是
+§八 降级链的第 2 步（CDP 坐标点击）被走通，不是第 1 步（合成事件）复活。
+
+```
+node scripts/choose.mjs --session <名> --options "<字段>"          # 只开菜单导选项，不选
+node scripts/choose.mjs --session <名> --set "<字段>=<值>" ...      # 逐个开→点→回读
+node scripts/choose.mjs --session <名> --set "学历#2=硕士研究生"    # #n = 第 n 个同名字段（1 起）
+```
+
+- 每个字段的**标记与点击必须原子**：`data-ch` 标记跨一次桥往返就可能被 React 重渲染换掉节点
+  （实测 `click: element not found: [data-ch=opt]`）。别把"标记"和"点击"分到两次 agent 调用里。
+- 回读走应用侧 display（`verifiedBy: 'display'`），不看 `input.value` —— 与引擎同一口径。
+- 选项匹配：精确 → 去括号/空格 → 唯一包含；**≥2 个候选报 `ambiguous` 而不是挑一个**，
+  一个都不命中就报 `none` 并把选项列表回给调用方去人看。纯函数有单测（`tests/choose.test.mjs`，11 例）。
+- 菜单异步渲染的重试靠**多次桥往返**（每次往返本身就是真实等待），不用定时器 ——
+  后台标签页里定时器被节流，那正是引擎 `tab-hidden` 的成因（见 §四）。
+
 **内部方法命名（固定，不许现编）**：
 `sleep / norm / trunc / j / setNativeValue / synthClick / fields / labelOf / heuristicType / typeOf /`
 `firstTitle / rowIndexOf / sectionOf / sectionByKind / groupCount / readSelect / valueOf /`
@@ -555,9 +583,11 @@ Moka 旧数据留档（89 字段那次）：解析填对 6 个（≈7%）、填�
 
 ## 九、项目结构
 
-**已落盘**：`engine/`（2）、`scripts/`（6：status / inject / capture-fixture / profile / match / resume-pdf）、
-`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（6：engine.test 11 例、profile.test 34 例、
-jobmatch.test、probe.test、resume-pdf.test 6 例、jsdom 桩、fixture、人工清单）、`docs/`（plans 00–06 + profile-template）。
+**已落盘**：`engine/`（2）、`scripts/`（9：status / inject / probe / capture-fixture / choose /
+profile / match / resume-pdf / check-private-leak）、
+`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（10：engine.test / profile.test /
+jobmatch.test / probe.test / resume-pdf.test / golden.test / choose.test 11 例 + jsdom 桩 + fixture + 人工清单）、
+`docs/`（plans 00–07 + profile-template）。
 **已落盘（2026-09-23 补）**：README / LICENSE(MIT+上游署名) / CHANGELOG。
 **尚未**：`skill/` 整个目录、`scripts/sync-skill.mjs`、`docs/guide-v2.md`。
 （三者都在 docs/plans/03 §6/§9 里被当成交付物，仓库里没有——读计划文档时会撞墙，见 CHANGELOG「已知未完成」。）
@@ -587,7 +617,8 @@ form-pilot/
 │   ├── capture-fixture.mjs  # 抓当前页表单outerHTML
 │   ├── profile.mjs       # 档案 CLI（--init/--import/--check/--render/--versions）+ --ui 本地服务
 │   ├── match.mjs         # jobmatch CLI（--fetch/--screen/--sites）
-│   ├── resume-pdf.mjs    # ATS 简历 PDF 生成（见 §十三）
+│   ├── resume-pdf.mjs    # ATS 简历 PDF 生成（见 §十三；默认不启用，见 §七）
+│   ├── choose.mjs        # 自定义下拉的驱动：开菜单 → 点选项 → 回读（见 §六 末）
 │   └── sync-skill.mjs    # engine/ → skill/references/ → ~/.config（单向，含GENERATED头）  ← Phase 3，未落盘
 ├── tests/
 │   ├── engine.test.mjs   # node:test + jsdom，11 例
