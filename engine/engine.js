@@ -454,6 +454,13 @@ window.__ja = {
       if (now !== r._v) swallowed.push(r);
       else r.final = trunc(now);
     }
+    // ★ 重试不是"多一层保险"，它有黄金用例撑着（2026-09-23 复核时差一点被按"未证有效"删掉）：
+    //   tests/golden.test.mjs「写入被 React 吞掉后自动重试，值真实粘住，retried 如实上报」
+    //     —— fixture 吞掉首写，断言 retried 含该字段、ok 计入成功、重试后的值真粘在 input 上；
+    //   tests/golden.test.mjs「重试后仍被吞时报 verify 失败，绝不报成功」
+    //     —— 断言 err = value-not-stuck-after-retry，且 retried 仍如实记录"重试确实发生过"。
+    // 判据链（docs/plans/05 §四）：写 → 同步读 → sleep 600 → 复读 → 不一致则重写 → sleep 400 → 再读 → 定 ok。
+    // 所以这一层的正确处置是留档证据，不是删代码 —— "找不到证据"往往等于"没找"。
     for (const r of swallowed) {
       const box = findField(r.id);
       const pick = box && pickInput(box);
@@ -716,6 +723,11 @@ window.__ja = {
           // 顺带每次重验下拉数量 —— 重渲染把控件换掉是这类组件最常见的失效方式。
           const cur = findField(id) || box;
           const list = [...cur.querySelectorAll(A.rangeSelectSel || A.textInputSel)].filter((e) => e.offsetHeight > 0);
+          // ★ 这次数量复检**不是**入口检查的重复（2026-09-23 复核结论）：
+          //   下面按固定下标取 `list[i * 2 + k]`（DOM 序 = 起始年/起始月/结束年/结束月）。
+          //   一旦中途重渲染让列表变短，原来的下标会**指到别的下拉上** —— 点下去就是静默点错，
+          //   比报错严重得多。所以这里必须在索引之前拦住，而不是等 `!sel` 报 select-detached。
+          //   与 `!sel || !sel.isConnected` 的分工：这里挡"数量变了→索引会错位"，那里挡"取到的节点已失联"。
           if (list.length < need) return j({ ok: false, err: 'range-selects-missing', id, selects: list.length, need });
           const sel = list[i * 2 + k];
           if (!sel || !sel.isConnected) return j({ ok: false, err: 'select-detached', id, step: want, picked: picks });

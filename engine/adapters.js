@@ -140,10 +140,15 @@ window.__jaAdapters = window.__jaAdapters || {
 
     // manual 机制（2026-09-22 L3 实战复盘，~25 轮通道全试无效，见 AGENTS.md §五）：
     // editable select（phoenix-select--editable）对 native setter / 真实 click / key_type /
-    // CDP insertText / CDP 鼠标 / 合成五件套全部免疫——菜单打不开、值写不进。
-    // 日期下拉与区域级联都是这个形态。本页普通下拉的值全部来自站内简历解析器，
-    // pickOption 在北森从未验证成功——与其再烧 25 轮，入口直接快速失败归手动。
-    // 唯一验证过的选择类通道是 setChoice（radio），choice 不在清单里。
+    // CDP insertText / CDP 鼠标 / 合成五件套全部免疫——菜单打不开、值写不进（**页内通道**）。
+    // 日期下拉与区域级联都是这个形态。
+    //
+    // ★ 口径（2026-09-23 更正，别读错）：这条限制的是**引擎的页内通道**，
+    //   不等于"这些字段只能人工"。`scripts/choose.mjs` 走扩展的真实坐标点击
+    //   （§八 降级链第 2 步）在两站实测可填：方正 PCB 9/11、苏纳 5/5。
+    //   所以 scan() 报的 manual 清单应理解为「**引擎填不了**」——流程是先用 choose.mjs 试，
+    //   驱动也填不了才进人工待办。仍保留本清单的理由：不让 pickOption 在页内再烧 25 轮。
+    //   唯一验证过无需驱动的选择类是 setChoice（radio），choice 不在清单里。
     manualTypes: ['select', 'date', 'cascade'],
   },
 
