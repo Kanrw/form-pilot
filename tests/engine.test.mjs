@@ -489,3 +489,30 @@ test('generic 适配器（无 manualTypes）pickOption 不受守卫影响，仍�
   // 没有菜单可开 → menu-not-open（既有路径），而不是 manual-required。
   assert.equal(r.err, 'menu-not-open');
 });
+
+// ★ 2026-09-23 韶音（Moka 私有化部署）实测：手机号码盒 = addon(+86) + 号码框两个可见 input。
+//   修之前：pickInput 判 composite → fillTexts 拒写；valueOf 各自 querySelector 命中 addon 框 →
+//   值明明写进号码框了 scan 仍报空，还把必填项列进 emptyRequired。
+const PHONE_HTML = `
+<div class="apply-field-ph9 string_info-a">
+  <div class="title">手机号码</div>
+  <input class="sd-Input-input sd-Input-has-addon" value="+86">
+  <input class="sd-Input-input" placeholder="请输入手机号" value="13800001234">
+</div>`;
+
+test('★ 手机号盒（addon + 号码框）：回读与写入都定位号码框，addon 不被写坏', async () => {
+  const dom = makeDom(PHONE_HTML);
+  const ja = loadEngine(dom);
+  const s = JSON.parse(ja.scan());
+  const f = s.fields.find((x) => x.label.indexOf('手机号码') === 0);
+  assert.ok(f, '字段应被扫到');
+  assert.equal(f.value, '13800001234', '回读不能取到 addon 框的 +86');
+
+  const r = JSON.parse(await ja.fillTexts({ 'main>>手机号码': '13800000000' }));
+  assert.deepEqual(r.failed, [], 'numberInputSel 到位后不该再判 composite 拒写');
+  assert.equal(r.ok, 1);
+
+  const ins = dom.window.document.querySelectorAll('input');
+  assert.equal(ins[0].value, '+86', 'addon 框不能被写入');
+  assert.equal(ins[1].value, '13800000000');
+});

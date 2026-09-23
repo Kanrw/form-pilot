@@ -20,6 +20,11 @@ window.__jaAdapters = window.__jaAdapters || {
     //   `apply-fields-*`，把 wrapper 当字段（实测 49 个真字段 → 误报 65 个）。
     fieldSel: '[class*=apply-field-]',
     labelSel: '[class*=title]',
+    // ★ 手机号盒 = addon(+86) + 号码框，两个可见 input（2026-09-23 韶音 shokz 实测）。
+    //   没有这条：pickInput 判 composite → fillTexts 拒写，且回读命中空的 addon 框。
+    //   依赖 placeholder 文案；站点改文案的后果是回退成 composite 拒写
+    //   —— 明确失败，不是静默错填到 +86 框里。
+    numberInputSel: 'input[placeholder="请输入手机号"]',
     // ★ menuSel 同时匹配面板（sd-Select-menu-*）与每个选项外层的 sd-Menu-container-*，
     //   而两者是父子关系 —— 实测「民族」一次弹出 1 个面板 + 58 个单项容器。
     //   收窄由引擎的 visibleMenus() 做「嵌套只留最外层」，**不要在这里删掉 sd-Menu-container**：

@@ -204,7 +204,11 @@ function readSelect(box) {
 
 function valueOf(box, type) {
   if (type === 'text' || type === 'textarea') {
-    const inp = box.querySelector(A.textInputSel);
+    // ★ 回读必须走 pickInput，不能各自 querySelector（见 pickInput 上的注释）。
+    //   失败实例：Moka「手机号码」盒 = addon(+86) + 号码框两个 input，
+    //   `box.querySelector(textInputSel)` 命中的是 addon 那个空的 ——
+    //   值已经写进号码框了，scan 却报空，还把必填项列进 emptyRequired。
+    const inp = pickInput(box).inp;
     return inp ? inp.value : '';
   }
   if (type === 'file') {
