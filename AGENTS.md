@@ -182,6 +182,45 @@
 - 提交 ≠ 推送，默认只落本地。推送是另一个动作，且推送前必须验
   `git ls-files | grep -E '^private/'` 输出为空（见 §一 隐私边界）。
 
+### 2.10 防御收窄（用户要求，2026-09-23）
+
+按 §2.3 逐层复核"这层防御对得上哪个已命名的失败"。结论：**引擎本体基本合格**
+（8 层守卫里 6 层指得出实测失败），问题集中在外层脚本。处置如下，**别把删掉的再捡回来**。
+
+**删掉（无调用方的开关 = 守卫里的后门 / 纯遗留）**
+
+- `check-private-leak.mjs --allow-missing-profile`：全仓只有它自己的报错文案提到它，零调用方。
+  删。要临时跳过就显式改用 `--patterns`（覆盖面更小，但留痕）。
+- `choose.mjs --dry` / `--tries`（flag 是死的，`TRIES` 常量留）、`filltext.mjs --dry`、
+  `choose.mjs` 里从未使用的 `readFileSync` 导入。
+- `check-private-leak.mjs` 对 `package-lock.json` 的排除：**真的取消后实测 tree/staged/patterns
+  三种范围都干净**，于是永久去掉。**排除清单现在是空的** —— 要加排除项必须先给出实测命中。
+
+**修（测试在替一份不运行的代码背书）**
+
+- `choose.mjs`：`matchOption` 有 6 例单测却**不在生产路径上**，页内另有一份语义不同的匹配器
+  （那份会"取第一个"）。改成：页内只负责取候选 + 打一次性标记，选谁一律回 Node 侧交给
+  `matchOption` —— **被测的就是在跑的那份**。顺带把"重复文本"从"取第一个"改成报
+  `option-ambiguous`，并新增开菜单前的 `closeOpenPanels()` 清残留面板（实测 `--options 到岗时间`
+  曾取回「学历」的候选；那种情况"取第一个"会把值点进**别的字段的面板**）。
+- `inject.mjs`：`--adapter` 名单与 `adapters.js` 注册项重复维护、只靠一条注释兜着（已漏过一次 feishu）。
+  改成导出 `KNOWN_ADAPTERS` + `tests/inject.test.mjs` 断言**双向相等**（多一个也红）；
+  顺手把 CLI 主体挪进 `main()` 并加 `invokedDirectly` 守卫，否则测试一 import 就被 `process.exit` 带走。
+
+**保留 + 补证词（复核推翻了我自己的两条判断，留档免得再被误删）**
+
+- `fillTexts` 的**自动重试**：我原判"无证据"，实际 `tests/golden.test.mjs` 有两条黄金用例
+  （吞值→重试→值真实粘住且 `retried` 如实上报；重试后仍被吞绝不报成功）。证据已写进 engine.js 注释。
+- `fillMonthRange` 循环内的数量复检：**不是**入口检查的重复 —— 下面按固定下标取 `list[i*2+k]`，
+  列表中途缩水会让下标**指到别的下拉**（静默点错），必须在取下标之前拦掉。
+  与 `!sel || !sel.isConnected` 的分工已写进注释：一个挡"索引会错位"，一个挡"取到的节点已失联"。
+- `beisen.manualTypes`：守卫保留（页内 `pickOption` 在北森确实打不开菜单），但**口径**改成
+  「引擎通道不可用」，**不等于人工** —— `scripts/choose.mjs` 走真实坐标点击可填（两站实测 11 中 9）。
+
+**这一轮的教训（写给下一个复核的人）**：**"找不到证据"经常等于"没找"**。这两条准备删的防御，
+证据都在仓库里（黄金用例、固定下标取法），只是不在代码旁边。
+所以复核动作的顺序必须是 **先 grep 全仓找证据，再决定删不删**。
+
 ## 三、已完成的工作
 
 ### 规划阶段（已完成）
@@ -450,8 +489,7 @@ __ja.use(adapter)                              → adapter.name（Object.assign�
 __ja.detect()                                  → 'moka' | 'beisen' | 'generic'
 __ja.scan()                                    → {total, fields:[{id,block,label,type,required,value}],
                                                   manual:[{id,type,reason:'adapter-manual'}],
-                                                  emptyRequired:[id]}
-__ja.readAll()                                 → [{id,block,label,type,value}]
+                                                  emptyRequired:[id]}__ja.readAll()                                 → [{id,block,label,type,value}]
 __ja.addRow(kind)                              → {ok,kind,from,to,added} | {ok:false,err:'section-not-found'
                                                   |'add-button-not-found'|'row-not-added'|...}
 __ja.fillTexts(map)                            → {ok:number, failed:[{id,phase,err,attempted,final}],
@@ -483,6 +521,10 @@ __ja.fillMonthRange(id, from, to)              → {ok,from,to,picks,assumed?,di
      这些类型归入 `manual` 清单；pickOption/fillDate 在**入口**即报 `manual-required`
      快速失败，不进入开菜单/等待循环。杜绝"换个通道再试 25 轮"复发。
      `emptyRequired` 只收 manual 之外的空必填，两个清单合起来就是使用者的人工待办。
+     **★ 口径（2026-09-23 更正）**：`manual` 的含义是「**引擎填不了**」，**不等于「只能人工」**。
+     北森那类自定义下拉可以交给 `scripts/choose.mjs`（真实坐标点击，两站实测 11 中 9）。
+     正确流程是：scan → 非 manual 的走引擎 → manual 的先试 choose.mjs → 驱动也填不了才进人工待办。
+     照旧读成"这一列都得我自己点"，会把本来能自动化的字段白推给使用者。
   2. **复合字段拒绝写入**（修复"报 ok 实际填错"的静默缺陷）：盒内有多个可见 input 且
      适配器未声明 `numberInputSel`（角色选择器）时，fillTexts 报 `composite-field` 拒写，
      一个字节都不落。声明了角色选择器则写入与回读走同一个 `pickInput()`——
@@ -670,9 +712,9 @@ Moka 旧数据留档（89 字段那次）：解析填对 6 个（≈7%）、填�
 
 **已落盘**：`engine/`（2）、`scripts/`（10：status / inject / probe / capture-fixture / filltext /
 choose / profile / match / resume-pdf / check-private-leak）、
-`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（12：engine.test / profile.test /
+`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（13：engine.test / profile.test /
 jobmatch.test / probe.test / resume-pdf.test / golden.test / choose.test / privacy.test /
-filltext.test + jsdom 桩 + fixture + 人工清单）、`docs/`（plans 00–07 + profile-template）。
+filltext.test / inject.test + jsdom 桩 + fixture + 人工清单）、`docs/`（plans 00–07 + profile-template）。
 **已落盘（2026-09-23 补）**：README / LICENSE(MIT+上游署名) / CHANGELOG。
 **已落盘（2026-09-23 再补，隐私闸门）**：`.githooks/`（pre-commit 扫暂存区、pre-push 扫工作树）、
 `.github/workflows/privacy.yml`（服务端模式判据）。见 §一 三层闸门。
