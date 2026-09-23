@@ -62,7 +62,7 @@
 git clone https://github.com/Kanrw/form-pilot.git
 cd form-pilot
 npm install          # 只有 jsdom / pdfkit / pdf-parse
-npm test             # 121 个用例，Node ≥22（jsdom 在 Node 20 下会崩，见 .github/workflows/privacy.yml）
+npm test             # 130 个用例，Node ≥22（jsdom 在 Node 20 下会崩，见 .github/workflows/privacy.yml）
 ```
 
 ### 1. 建本地档案（一次性）
@@ -106,7 +106,7 @@ node scripts/resume-pdf.mjs --version <名>                    # ATS 简历 PDF 
 | 路径 | 作用 |
 | --- | --- |
 | `engine/` | ★ 代码唯一事实源：`engine.js`（通用引擎）、`adapters.js`（站点注册表） |
-| `scripts/` | 命令行胶水：inject / status / probe / capture-fixture / profile / match / resume-pdf / check-private-leak |
+| `scripts/` | 命令行胶水：status / inject / probe / capture-fixture / filltext / choose / profile / match / resume-pdf / check-private-leak |
 | `jobmatch/` | 岗位筛选：站点适配、抓取、硬门槛闸门（不出百分比分数，伪精确是误导） |
 | `tools/` | 本地档案编辑器（HTML/CSS/JS）+ 档案导入导出 + 字段 schema |
 | `tests/` | `node:test` + jsdom 跑纯逻辑；菜单时序类进 `tests/manual-e2e.md` 人工清单 |
@@ -142,7 +142,7 @@ node scripts/check-private-leak.mjs --patterns    # ④ 纯模式判据，不需
 
 ## 开发与贡献
 
-- 命令：`npm test`（121 用例）、`npm run check`（测试 + 隐私守卫，提交前必跑）。
+- 命令：`npm test`（130 用例）、`npm run check`（测试 + 隐私守卫，提交前必跑）。
 - 改 `engine/` 后同步更新 `verified` 日期与 CHANGELOG 条目。
 - 纪律见 `AGENTS.md`（给后续维护 AI 的上下文：事实源规则、安全边界、实测记录、双 agent 执行-监督约定）。
 - 上游关系：先独立仓库，后轻量回馈（已在 ASu-skills 开 issue 的思路），不直接提 PR——v2 把"下拉默认人工"改成"AI 默认填"，是设计取向分叉而非 bugfix。

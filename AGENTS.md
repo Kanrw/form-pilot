@@ -310,6 +310,30 @@
   用之后必须另发一次 evaluate 回读。**引擎的 `fillTexts` 在 hidden 下必然报 `tab-hidden`，
   同参数重试上限 2 次（§2.8 红线 3）；第 2 次仍失败就换通道或转人工，不要试第三次。**
 
+### ★ 批量写入的静默错写（2026-09-23 苏纳 SUNA 会话，脚本已修）
+
+**失败形态**（本项目最贵的一类：报告写着"已验证"，实际写错了字段）：
+临时批量写入脚本给元素打 `data-fp=ft0/ft1/...` 标记后**没清理**，第二轮运行复用同一批标记名，
+页面上于是同时存在新旧两套同名标记 → `document.querySelector('[data-fp=ft0]')` 取的是
+**文档里第一个**匹配（第一轮写的「姓名」输入框）→ 第二轮要写的「获得证书」落到了姓名上，
+**姓名/学号/邮箱三个字段被证书文本/爱好/项目描述覆盖**。更糟的是回读也用同一个选择器，
+**读写两边错到一起**，所以第一轮报告是"14/14 已写入、回读一致"。
+发现方式：用引擎 `scan()` 与"按 label 取盒内真值"两条独立路径对读，出现 3 处不一致。
+
+**三条纪律（`scripts/filltext.mjs` 已内建，别退回）**：
+
+1. 开跑前**清掉本脚本自己用过的全部标记**（跨轮次残留是事故的直接原因）；
+2. 标记带**一次性随机前缀**（`run + i`），进程内不复用、跨进程不重名；
+3. **回读一律按 label 定位盒内元素**，绝不用全局标记选择器 —— 这是唯一能发现"写错字段"的读法。
+
+另两条实现坑：`label.innerText` 在 jsdom 里是 `undefined`（只有真浏览器才有），读 label 要
+`innerText || textContent`，否则定位逻辑根本没法单测；注入代码里别写 `'\n'`
+（Node 模板字符串会提前把它转成真换行，浏览器端直接 SyntaxError），用 `String.fromCharCode(10)`。
+
+`scripts/filltext.mjs` = 后台标签页下的**文本/文本域写入通道**（桥的原生 `fill`，不吃定时器节流，
+见上一节），用法 `--set "<字段>=<值>"`。它只写"盒内可见控件恰好 1 个"的字段，多于 1 个直接拒写
+（与引擎 `composite-field` 同一条纪律）。
+
 ### 下拉触发器是"切换"语义（2026-09-22 实测）
 
 同一下拉**连点两次**，可见面板数 `0 → 1 → 0`：点击一个**已经打开**的触发器是把它**关掉**。
@@ -644,11 +668,11 @@ Moka 旧数据留档（89 字段那次）：解析填对 6 个（≈7%）、填�
 
 ## 九、项目结构
 
-**已落盘**：`engine/`（2）、`scripts/`（9：status / inject / probe / capture-fixture / choose /
-profile / match / resume-pdf / check-private-leak）、
-`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（11：engine.test / profile.test /
-jobmatch.test / probe.test / resume-pdf.test / golden.test / choose.test / privacy.test +
-jsdom 桩 + fixture + 人工清单）、`docs/`（plans 00–07 + profile-template）。
+**已落盘**：`engine/`（2）、`scripts/`（10：status / inject / probe / capture-fixture / filltext /
+choose / profile / match / resume-pdf / check-private-leak）、
+`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（12：engine.test / profile.test /
+jobmatch.test / probe.test / resume-pdf.test / golden.test / choose.test / privacy.test /
+filltext.test + jsdom 桩 + fixture + 人工清单）、`docs/`（plans 00–07 + profile-template）。
 **已落盘（2026-09-23 补）**：README / LICENSE(MIT+上游署名) / CHANGELOG。
 **已落盘（2026-09-23 再补，隐私闸门）**：`.githooks/`（pre-commit 扫暂存区、pre-push 扫工作树）、
 `.github/workflows/privacy.yml`（服务端模式判据）。见 §一 三层闸门。
@@ -686,6 +710,7 @@ form-pilot/
 │   ├── match.mjs         # jobmatch CLI（--fetch/--screen/--sites）
 │   ├── resume-pdf.mjs    # ATS 简历 PDF 生成（见 §十三；默认不启用，见 §七）
 │   ├── choose.mjs        # 自定义下拉的驱动：开菜单 → 点选项 → 回读（见 §六 末）
+│   ├── filltext.mjs      # 文本/文本域写入（后台标签页可用）+ 标记纪律（见 §四 静默错写一节）
 │   └── sync-skill.mjs    # engine/ → skill/references/ → ~/.config（单向，含GENERATED头）  ← Phase 3，未落盘
 ├── tests/
 │   ├── engine.test.mjs   # node:test + jsdom，11 例
