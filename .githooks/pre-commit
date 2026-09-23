@@ -6,11 +6,12 @@
 #
 # 禁止 --no-verify 绕过（AGENTS §一）。
 #
-# 判据分两种，取决于 private/ **目录**在不在：
-#   在  → 按档案值逐条比对（最强），这是主 checkout 的常态；
-#   不在（新克隆 / 贡献者机器）→ 降级为模式判据，否则谁都提交不了。
-#   private/ 在但档案读不出来时，脚本自己会失败关闭 —— 那种"本以为有、其实没读到"
-#   才是最危险的，必须拦死，不能在这里兜底放行。
+# 判据分两种，区分信号是 private/ **目录**在不在（不是 profile.json 在不在 —— 这点很关键）：
+#   目录在  → 走严格模式（按档案值逐条比对）。档案读不出来时脚本自己失败关闭并拦死提交，
+#             这正是"档案被改名/误删"的形态：以为有保护、其实没读到，必须拦。
+#   不在    → 降级为模式判据（本机路径 / 手机号 / 身份证号），否则新克隆里谁都提交不了。
+# 实测教训：第一版这里写的是 `-f private/profile.json`，于是档案一改名就**悄悄退到弱判据**，
+# 严格模式永远没机会执行 —— 按文件判断等于把失败关闭做废了。
 
 if ! command -v node >/dev/null 2>&1; then
   echo "pre-commit: 找不到 node，无法跑隐私守卫 —— 拒绝提交（失败关闭）。" >&2
@@ -18,9 +19,9 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ -f private/profile.json ]; then
+if [ -d private ]; then
   exec node scripts/check-private-leak.mjs --staged
 fi
 
-echo "pre-commit: 本 checkout 没有 private/profile.json —— 退回模式判据（本机路径 / 手机号 / 身份证号）。" >&2
+echo "pre-commit: 本 checkout 没有 private/ —— 退回模式判据（本机路径 / 手机号 / 身份证号）。" >&2
 exec node scripts/check-private-leak.mjs --staged --patterns
