@@ -233,7 +233,7 @@
     var message = messageFor(id, field, ctx);
     // 文本框的 hint 已经当占位符显示过了，别再在下面重复一遍（日期控件与下拉没有占位符，则不在此列）。
     if (message && message.kind === 'hint' && field.hint && field.type !== 'select') message = null;
-    // 原生日期控件按浏览器区域显示：这台机器上是 DD/MM/YYYY，所以 2001-01-01 显示成 10/02/2000。
+    // 原生日期控件按浏览器区域显示：这台机器上是 DD/MM/YYYY，所以 2001-01-01 显示成 01/01/2001。
     // 存的值始终是 ISO YYYY-MM-DD，把 ISO 回显出来，免得用户按显示格式去读。
     if (field.type === 'date' && !isBlank(value) && !message) {
       message = { kind: 'hint', text: '存的是 ' + value };

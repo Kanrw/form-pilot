@@ -7,7 +7,7 @@
 ## 一、项目身份
 
 - 名称：form-pilot
-- 路径：`~/Documents/FindAJob/form-pilot/`
+- 路径：本机 `~/Documents/FindAJob/form-pilot/`（仓库内一律用相对路径，不写死单机绝对路径）
 - 目的：浏览器表单自动填写引擎（求职申请），LLM 在循环外，循环内全是确定性 JS
 - 生态位：Simplify 式 autofill（快但笨）与 Skyvern/browser-use 式 agent（聪明但贵）之间
 - 不做：批量投递、绕过验证、替用户提交、替用户猜测无来源字段
@@ -169,7 +169,7 @@
 - Moka 选中值显示在 `[class*=sd-Input-display-value]`（input.value 恒为空）
 - Moka 字段容器 `[class*=apply-field]`，label 在 `[class*=title]`
 
-**验证时使用的 Moka URL**（用户真实 CATL 校招申请页，仅探测未提交）：
+**验证时使用的 Moka URL**（某家真实校招申请页，仅探测未提交；此处只留形状，具体 org/jobId 不入库）：
 `https://app.mokahr.com/campus-recruitment/<orgSlug>/<orgId>#/job/<jobId>/apply`
 
 ### 技能文件（已写入）
@@ -411,8 +411,9 @@ __ja.fillMonthRange(id, from, to)              → {ok,from,to,picks,assumed?,di
   `option-not-found`，把排查引向站点改版，而真凶通常是档案里的日期写错了。
 - **「学校名称 / 专业名称」是联想输入（type-ahead），不是普通文本框（2026-09-22 实测）。**
   这两个字段下面挂着候选面板。实测看到的内容：
-  学校 = `<示例大学>` / `<示例大学>继续教育学院` / `<示例大学>网络教育学院` / `广州城市理工学院`；
+  学校 = `<示例大学>` / `<示例大学>继续教育学院` / `<示例大学>网络教育学院` / `<示例学院>`；
   专业 = `<示例专业>` / `物理学` / `没有找到专业？添加专业全称`。
+  （此处只记录控件形态，真实候选值属个人数据，不入库。）
   `fillTexts` 只把文本写进 input，**不从候选里确认**，后果有两层：
   ① 值不被应用正式接受（看着填好了，应用不一定认）；
   ② **候选面板一直挂在页面上** —— 实测使用者因此在操作表单时被反复干扰，
@@ -685,7 +686,7 @@ Node 22 把路径参数当模块加载，报 `Cannot find module '…/tests'`。
 
 **踩过并已修的三个坑**（各有单测盯着，见 `tests/jobmatch.test.mjs` 的 ★）
 
-1. `splitTerms` 不拆括号时，"<示例研究方向>（半导体缺陷…）"整串进词典 → 词典只剩 2 个词 → 全场 0 命中。
+1. `splitTerms` 不拆括号时，"<某研究方向>（半导体缺陷…）"整串进词典 → 词典只剩 2 个词 → 全场 0 命中。
 2. 专业门槛正则只写"专业"二字会命中"应用专业方法或工具"这类句子 → HRBP 岗被判专业不符。
    现在前置式必须带显式标签或冒号，后置式认"…等相关专业"。
 3. `skills.category`（"编程 / 工具"）进词典 → 75 个岗位里 38 个靠"工具""编程"假命中。现在只用 `content`。

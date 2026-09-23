@@ -85,7 +85,8 @@ window.__jaAdapters = window.__jaAdapters || {
   feishu: {
     name: 'feishu',
     verified: '2026-09-22',
-    source: 'https://varp4lp3dbc.jobs.feishu.cn/708509/resume/<resumeId>/apply',
+    // 具体 URL 含个人 resumeId，不入库；形状如下，探测时按当前页面替换即可。
+    source: 'https://<tenant>.jobs.feishu.cn/<siteId>/resume/<resumeId>/apply',
 
     // ★ ~= 是按空白分词的完整词匹配。裸 [class*=atsx-form-item] 会同时命中
     //   form-item-label / -control / -children / -required（实测 156 个节点 → 真盒子只有 28 个）。

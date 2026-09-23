@@ -133,14 +133,14 @@ test('日期：导入归一化并补到日，补了什么要说出来', () => {
     '### [0] 最高学历',
     '- 就读时间：2019.09 - 2023.06',
     '### [1] 第二段',
-    '- 就读时间：2023.09 — 至今',
+    '- 就读时间：2021.09 — 至今',
   ].join('\n');
   const { values, assumedDates } = importMarkdown(md);
 
   assert.equal(values['basic.birthDate'], '2000-02', '单独日期只归一化，不擅自补日');
   // ★ 表单的日期是"年 → 月 → 日"三级选择：档案里存到日，填表时就不用每处现场补一个日子。
   assert.equal(values.education[0].period, '2019-09-01 -- 2023-06-30', '开始补月初、结束补月末');
-  assert.equal(values.education[1].period, '2018-09-01 -- 至今');
+  assert.equal(values.education[1].period, '2021-09-01 -- 至今');
   assert.equal(assumedDates.length, 2, '补了哪几处必须报出来，不能冒充事实');
   assert.ok(assumedDates[0].includes('开始补日'));
   assert.deepEqual(validateValues(values).errors, []);
@@ -170,7 +170,7 @@ test('日期区间：只有年份时不能被切出多余的短横线', () => {
 
 test('值里带批注 → warn，不阻断', () => {
   const values = emptyValues();
-  values['basic.nationality'] = '中国（由"共青团员 + <示例大学>"推断，**待你确认**）';
+  values['basic.nationality'] = '中国（由"政治面貌 + 学校名"推断，**待你确认**）';
 
   const { errors, warnings } = validateValues(values);
   // 批注不是格式错：拦下来会让人没法保存，但它必须被说出来，
@@ -198,10 +198,10 @@ test('标签的别写法与 markdown 强调都能对上', () => {
 });
 
 test('补日约定：月初与月末，闰月也要对', () => {
-  assert.equal(expandRangeToDay('2023-09 -- 2027-06').text, '2023-09-01 -- 2027-06-30');
+  assert.equal(expandRangeToDay('2022-09 -- 2026-06').text, '2022-09-01 -- 2026-06-30');
   assert.equal(expandRangeToDay('2019-02 -- 2020-02').text, '2019-02-01 -- 2020-02-29', '闰年二月是 29 日');
   assert.equal(expandRangeToDay('2024 -- 2025').text, '2024-01-01 -- 2025-12-31');
-  assert.equal(expandRangeToDay('2023-09 -- 至今').text, '2018-09-01 -- 至今');
+  assert.equal(expandRangeToDay('2018-09 -- 至今').text, '2018-09-01 -- 至今');
   // 已经到日的值不能被改动 —— 补日只补缺的精度，不重写已知事实
   assert.deepEqual(expandRangeToDay('2022-09-02 -- 2026-06-30'), { text: '2022-09-02 -- 2026-06-30', assumed: [] });
 });
@@ -564,21 +564,21 @@ test('版本视图：被覆盖的行有标记与还原入口，白名单字段�
 
 test('日期区间用两个原生日期控件，不是自由文本', () => {
   const f = editorFixture();
-  f.values.education.push({ period: '2023-09-01 -- 2027-06-30' });
+  f.values.education.push({ period: '2022-09-01 -- 2026-06-30' });
   const node = f.editor.renderSection(f.mount('main'), f.build('education'));
   const row = node.querySelector('[data-rowkey="education[0].period"]');
   const pickers = row.querySelectorAll('input[type="date"]');
 
   // ★ 填表时这类字段多是"年→月→日"三级选择；档案里也该是选出来的值，而不是手打一行文本。
   assert.equal(pickers.length, 2, '起止各一个日期控件');
-  assert.equal(pickers[0].value, '2023-09-01');
-  assert.equal(pickers[1].value, '2027-06-30');
+  assert.equal(pickers[0].value, '2022-09-01');
+  assert.equal(pickers[1].value, '2026-06-30');
 
   // 只到月的旧值退化成文本框：日期控件会把不合规的值显示成空，一保存就静默清掉。
-  f.values.education[0].period = '2023-09 -- 2027-06';
+  f.values.education[0].period = '2022-09 -- 2026-06';
   const row2 = f.editor.renderSection(f.mount('main'), f.build('education')).querySelector('[data-rowkey="education[0].period"]');
   assert.equal(row2.querySelectorAll('input[type="date"]').length, 0);
-  assert.equal(row2.querySelector('input').value, '2023-09 -- 2027-06');
+  assert.equal(row2.querySelector('input').value, '2022-09 -- 2026-06');
 });
 
 test('登记表：日期字段回显 ISO 值，消歧义', () => {
@@ -586,7 +586,7 @@ test('登记表：日期字段回显 ISO 值，消歧义', () => {
   f.values['basic.birthDate'] = '2001-01-01';
   const node = f.editor.renderSection(f.mount('main'), f.build('basic'));
   const row = node.querySelector('[data-rowkey="basic.birthDate"]');
-  // ★ 原生日期控件按浏览器区域显示（这台机器上是 DD/MM/YYYY，即 10/02/2000），
+  // ★ 原生日期控件按浏览器区域显示（这台机器上是 DD/MM/YYYY，即 01/01/2001），
   //   存的值始终是 ISO —— 不把 ISO 写出来，用户会按显示格式去读。
   assert.ok(row.querySelector('.field-msg').textContent.includes('2001-01-01'));
 });

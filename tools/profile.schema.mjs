@@ -110,7 +110,7 @@ export const SECTIONS = [
       f('studyType', '学习形式', 'select', 'auto', { options: ['全日制', '非全日制', '海外留学生'], aliases: ['受教育类型'] }),
       f('degree', '学历', 'select', 'auto', { options: ['本科', '硕士研究生', '博士研究生'], aliases: ['最高学历'] }),
       f('degreeAwarded', '已获学位', 'text', 'confirm', { hint: '在读/转博都是"无"，如实填' }),
-      f('programType', '培养类型', 'text', 'auto', { hint: '如：学术型博士、专业型硕士、<示例班>' }),
+      f('programType', '培养类型', 'text', 'auto', { hint: '如：学术型博士、专业型硕士、某某实验班' }),
       f('department', '学院', 'text', 'auto', { aliases: ['院系', '所在学院'] }),
       f('major', '专业名称', 'text', 'auto'),
       f('researchDirection', '研究方向', 'text', 'auto'),

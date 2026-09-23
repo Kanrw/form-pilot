@@ -22,11 +22,11 @@ const PROFILE = {
   education: [
     {
       degree: '博士研究生',
-      major: '<示例专业>（<示例班>）',
-      researchDirection: '<示例研究方向>（半导体缺陷与掺杂的第一性原理建模、高通量计算流程开发）',
+      major: '物理学（示例班）',
+      researchDirection: '示例研究方向（半导体缺陷与掺杂的第一性原理建模、示例技术二）',
     },
   ],
-  skills: [{ category: '编程 / 工具', content: 'VASP、Python 高通量计算流程开发、Slurm 集群运维' }],
+  skills: [{ category: '编程 / 工具', content: 'VASP、Python 示例技术二、Slurm 集群运维' }],
   intent: { targetCities: '深圳 东莞', targetRole: '半导体计算 / 仿真算法', targetIndustries: '半导体 / 计算材料' },
   experience: [],
 };
@@ -45,11 +45,11 @@ test('normalizeText 统一全角、大小写与分隔符', () => {
 });
 
 test('splitTerms 括号内外分别成词', () => {
-  // ★ 不拆括号时，"<示例研究方向>（半导体缺陷…）"整串进词典，JD 里永远匹配不到 ——
+  // ★ 不拆括号时，"示例研究方向（半导体缺陷…）"整串进词典，JD 里永远匹配不到 ——
   //   实测词典只剩 2 个词，所有岗位命中数为 0。
-  const terms = splitTerms('<示例研究方向>（半导体缺陷与掺杂的第一性原理建模、高通量计算流程开发）');
-  assert.ok(terms.includes('<示例研究方向>'), `实际：${JSON.stringify(terms)}`);
-  assert.ok(terms.some((t) => t.includes('高通量计算流程开发')));
+  const terms = splitTerms('示例研究方向（半导体缺陷与掺杂的第一性原理建模、示例技术二）');
+  assert.ok(terms.includes('示例研究方向'), `实际：${JSON.stringify(terms)}`);
+  assert.ok(terms.some((t) => t.includes('示例技术二')));
   assert.ok(!terms.some((t) => t.includes('（')), '括号字符必须清掉');
 });
 
