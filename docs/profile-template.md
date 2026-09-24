@@ -142,6 +142,7 @@ git status --short --ignored | grep private     # 应显示 !! private/
 - 期刊 / 会议：
 - 作者位次：
 - 年卷页：
+- 发表日期：YYYY-MM-DD（只有年月就写 YYYY-MM；审稿中的留空）
 - 状态：已发表 / 审稿中
 
 ## 8. 获奖

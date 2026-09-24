@@ -179,6 +179,7 @@ export const SECTIONS = [
       f('venue', '期刊 / 会议', 'text', 'auto', { aliases: ['期刊', '发表期刊'] }),
       f('authorPosition', '作者位次', 'text', 'auto'),
       f('citation', '年卷页', 'text', 'auto'),
+      f('publishDate', '发表日期', 'date', 'auto', { validate: err(DATE_RE, '用 YYYY-MM-DD；只有年月就写 YYYY-MM（引擎会按 01 补日并报出来）') }),
       f('status', '状态', 'select', 'confirm', { options: ['已发表', '审稿中', '准备中'] }),
     ],
   },
