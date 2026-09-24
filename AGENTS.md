@@ -2,7 +2,48 @@
 
 > 本文件只记录已发生的事实与决定，不含新规划。后续 agent 请基于此文档继续执行。
 > **§二 工作纪律优先于任何规划文档的"顺带做掉"倾向**；冲突时以 §二 为准。
-> 最后更新：2026-09-23
+> 2026-09-24 拆分：主文件只留「启动必读」，实证细节与规格**全文**搬进 `docs/`（一个字没删，只搬家）。
+> 最后更新：2026-09-24
+
+## 0 · 60 秒启动
+
+**是什么**：浏览器表单自动填写引擎（求职申请场景）。LLM 在循环外，循环内全是确定性 JS；
+真实浏览器通过 Kimi WebBridge 桥接驱动，用的是使用者本人的登录态。
+
+**三条硬约束**（违反即回退；要放宽先改规则，不要在命令行上偷过）
+
+1. 真实个人信息只进 `private/`（gitignored），**永不进 git**；推送前
+   `git ls-files | grep -E '^private/'` 必须为空。
+2. §2.4 的投机性建设，在触发条件出现前**不实现、不写骨架、不留占位接口**。
+3. 动手前先答 §2.1 的三问（对应哪条验收 / 边界在哪 / 保住了什么既有保证），答不出就不写代码。
+
+**隐私守卫**：三层闸门（pre-commit 扫**暂存区** / pre-push 扫工作树 / `--history` 事后审计）
++ GitHub Actions 模式判据。**禁止 `--no-verify`**。全文见 `docs/privacy.md`。
+
+**当前能做什么**：引擎注入 + 字段扫描 + 文本/日期填写已可用且实测过；档案（14 区段）与隐私
+闸门已落盘；桥接状态**每次使用前重新读**（`node scripts/status.mjs`），不引用任何历史值。
+
+**下一步**：见 §十一。
+
+### 旧章节 → 新位置（2026-09-24 拆分）
+
+| 旧 § | 内容 | 现在在哪 |
+| --- | --- | --- |
+| §一 | 项目身份 · 隐私边界 · 三层闸门 | 本文要点 + `docs/privacy.md` 全文 |
+| §二 | 工作纪律（stop-that-shit 落地条款） | 本文要点 + `docs/discipline.md` 全文 |
+| §三 | 已完成的工作 | `docs/history.md` |
+| §四 | 基础设施现状（桥接） | `docs/bridge.md` |
+| §五 | 适配器注册表 | `docs/stations.md` |
+| §六 / §七 / §八 / §十 | 引擎 API / 字段 ID 格式 / 降级链 / 同步方案 | `docs/engine-api.md` |
+| §九 | 项目结构 | 本文（未搬） |
+| §十一 | 进度与下一步 | 本文要点 + `docs/history.md`（验收明细） |
+| §十二 / §十三 | jobmatch 模组 / ATS 简历 PDF 模组 | `docs/modules.md` |
+| §十四 | Element Plus 型站点实测（新凯来） | `docs/stations.md` |
+
+> **章节号沿用原编号**，所以"§二 优先于规划文档"这类说法仍然成立。
+> **跨文件引用换算**：本文档、`docs/*.md`、`docs/plans/*.md` 以及代码注释里出现的
+> 「`AGENTS.md §X`」或「见 §X」，一律按上表找对应的实体文件 —— 编号没变，只是本体搬了家。
+> 出处仍在 AGENTS.md 的只有 §0（启动块）、§一 / §二（要点版）、§九（未搬）、§十一（要点版）。
 
 ## 一、项目身份
 
@@ -12,711 +53,71 @@
 - 生态位：Simplify 式 autofill（快但笨）与 Skyvern/browser-use 式 agent（聪明但贵）之间
 - 不做：批量投递、绕过验证、替用户提交、替用户猜测无来源字段
 
-**隐私边界（硬规则，不可放松）**
+**隐私边界（硬规则，不可放松）** —— 全文与推导见 `docs/privacy.md`，要点：
 
-本项目目标是公开分发，所以个人数据与项目资产必须物理隔离：
+- 真实个人信息只放 `private/`。**不要放进 `data/`** —— 本机 `~/Documents/FindAJob/resume/data/`
+  是**被提交**的资产目录，同名反义。
+- 档案三个文件：字段定义在 `tools/profile.schema.mjs`（含三类分类），值在 `private/profile.json`，
+  人读镜像与 `--import` 输入格式在 `docs/profile-template.md`。界面：`node scripts/profile.mjs --ui`。
+- 分类只写 schema，不写数据文件。`never` 类（证件号码等）**不进任何映射**，
+  `--render` 与 `GET /api/mapping` 里一项都不许出现，有测试盯着。
+- 身份证号、银行卡号、密码、验证码属**永不自动填**：不因"档案里已经写了"而放宽。
+- 引擎**不读** `private/`。它只通过 `fillTexts(map)` 收到"某字段填某值"，映射由使用者确认（第一道闸门）。
+- 推送前必须验证：`git ls-files | grep -E '^private/'` 输出为空。
 
-- 真实个人信息只放 `private/`（已在 `.gitignore`）。**不要放进 `data/`** ——
-  本机 `~/Documents/FindAJob/resume/data/` 是**被提交**的资产目录，同名反义。
-- 档案是两个文件：字段定义（含三类分类）在 `tools/profile.schema.mjs`，值在 `private/profile.json`；
-  人读镜像与 `--import` 的输入格式是 `docs/profile-template.md`。界面：`node scripts/profile.mjs --ui`。
-- 档案还允许有"投放版本"：`private/profiles/<名>.json` 只存差异（`{ overrides }`），基准是 `private/profile.json`。
-  **版本能覆盖什么由 `tools/profile.schema.mjs` 的 `OVERRIDABLE_KEYS` 白名单卡死**（当前 9 项：求职意向 8 项 + 自我评价），
-  `validateOverrides()` / `writeVersion()` / 界面锁定三处一起挡 —— 放开会让"改手机号"变成"只改了某个版本"，而这是静默的。
-- 分类只写 schema，不写进数据文件。`never` 类（证件号码等）在界面上进朱砂虚线围栏，
-  且**不进任何映射**：`--render` 与 `GET /api/mapping` 的输出里一项都不许出现，有测试盯着这条。
-- 写入路径由代码守着：`scripts/profile.mjs` 与服务端的任何落盘都必须落在 `<root>/private/` 内，越界直接拒绝。
-- **推送前必须验证**：`git ls-files | grep -E '^private/'` 输出为空。
-  把 profile 内容或附件搬进 `tests/fixtures/`、`docs/`、`CHANGELOG` 同样违规。
-- 身份证号、银行卡号、密码、验证码属**永不自动填**：引擎不提供也不接受这类值，
-  一律进"待你手动"清单。这条不因"档案里已经写了"而放宽。
-
-  > **待决（2026-09-22）**：首次真实投递后，使用者提出"身份证号码你没帮我填"。
-  > 这是**边界本身待他决定**，不是漏填。要放宽的正确做法是
-  > **改 `tools/profile.schema.mjs` 里 `basic.idNumber` 的 `autofill` 分类**（`never` → 其它档位），
-  > 走既有的三分类机制；**不是给引擎开口子**。在此之前引擎仍按 `never` 处理。
-- 引擎**不读** `private/`。它只能通过 `fillTexts(map)` 收到"某字段填某值"，
-  而 `字段 → 值` 的映射由用户在对话里确认（三道闸门的第一道）。
-
-### ★ 隐私守卫：三层闸门（用户决策，2026-09-23，**最高优先级**）
-
-**为什么是三层**：踩过三次，每次的成因都不同，只加一层挡不住下一种。
-
-| 事故 | 成因 | 现在谁挡它 |
-| --- | --- | --- |
-| 手机号进了 AGENTS.md | 人工看不出真值长什么样 | 按 `private/` 逐值比对（不能只靠正则） |
-| 真值在提交 A 进仓库、提交 B 才从工作树删掉 | **改工作树删不掉历史** | `--history` 模式 |
-| 提交前只跑了 `npm test`，没跑守卫 | 人的记性不是防线 | `.githooks/pre-commit` 强制跑 `--staged` |
-
-**三层闸门 + 一道事后网**：
+### 隐私守卫：三层闸门（用户决策 2026-09-23，**最高优先级**）
 
 | 层 | 命令 | 扫什么 | 何时跑 |
 | --- | --- | --- | --- |
-| 1 提交前 | `check-private-leak.mjs --staged` | **暂存区内容**（`git show :<path>`），不是磁盘 | `.githooks/pre-commit` 自动，**过不去就提交不了** |
-| 2 推送前 / 日常 | `check-private-leak.mjs`（默认 tree） | 已跟踪文件 + `private/` 是否被跟踪 | `.githooks/pre-push` 自动 · `npm run check` |
-| 3 事后审计 | `--history` | `git log -p --all` 全部历史，命中会**点名到哪个 SHA** | `npm run check:privacy:history`（人工，推送不跑它） |
-| 网 | `--patterns` | 本机绝对路径 / 手机号 / 身份证号三类模式，**不需要档案** | GitHub Actions（`.github/workflows/privacy.yml`） |
+| 1 提交前 | `check-private-leak.mjs --staged` | **暂存区内容**（`git show :<path>`），不是磁盘 | `.githooks/pre-commit` 自动，过不去就提交不了 |
+| 2 推送前 / 日常 | `check-private-leak.mjs`（默认 tree） | 已跟踪文件 + `private/` 是否被跟踪 | `.githooks/pre-push` · `npm run check` |
+| 3 事后审计 | `--history` | `git log -p --all` 全历史，命中点名到 SHA | `npm run check:privacy:history`（人工） |
+| 网 | `--patterns` | 本机绝对路径 / 手机号 / 身份证号三类模式 | GitHub Actions |
 
-- **第 1 层必须扫 index 而不是工作树**：被 `git add` 之后又在磁盘上改干净的文件，
-  提交进去的仍是脏内容。这是"扫工作树"挡不住的一类绕过，别改回去。
-- **失败关闭，但只对"本该有档案却没有"生效。** 区分信号是 `private/` **目录**在不在：
-  目录在、档案读不出来（改名 / 误删 / 坏 JSON）→ **exit 1 拒绝比对**（这才是最危险的形态：
-  以为有保护、其实根本没读到）；目录根本不在（新克隆 / 贡献者机器）→ 降级为模式判据并打告警，
-  否则那边**一个提交都做不了**。旧版把这两种情况混成一句"跳过并 exit 0"（fail-open），
-  一个重命名就能把守卫废掉。
-- **扫描范围与判据是两个维度**：`--staged` / `--history` 是范围，`--patterns` 表示"不要求 private/"。
-  可叠加 —— `.githooks/pre-commit` 在没有档案的 checkout 里跑的就是 `--staged --patterns`。
-  早先把 `--patterns` 写成第三种"范围"是错的：那样新克隆里 pre-commit 只剩"堵死"和"放行"两个选项。
-- **守卫自己被扫**：排除清单现在只有 `package-lock.json`。旧版把守卫自身排除，结果
-  "守卫里写进真值"成了盲区 —— 落地当天就踩到一次（白名单里手滑写了真实手机号，三种模式全没报）。
-- **禁止 `--no-verify`**。钩子是防线不是障碍；要绕过先改这条规则，不要在命令行上偷过。
-  诚实提醒：钩子可以被 `--no-verify` 绕过，所以 GitHub Actions 那道网必须留着。
-- 白名单（`ALLOW` / `ALLOW_PATTERN`）**每条必须写理由**，且 `ALLOW_PATTERN` 有 10 条上界
-  （`tests/privacy.test.mjs` 盯着）。白名单是最容易被顺手放宽的地方，一涨就说明有人在消音。
-- **已清（2026-09-23 删库重建）**：`npm run check:privacy:history` **现在是干净的**。
-  曾经的 3 个已公开档案值走了这条完整路径：改工作树无效 → 重写历史 + force push 也清不掉
-  （GitHub 仍按旧 SHA 提供对象）→ **只有删库重建能清**。这次执行的是：
-  用户网页删库 → 本地 `filter-branch` 把三个值替换为泛称 → 删掉陈旧的 `origin/main`
-  （它是改写后唯一还能走到旧提交的引用）→ reflog expire + `gc --prune=now` → 复核远端 404。
-  **代价：全部 SHA 变了**，所以本文件里任何旧 SHA 引用都不再存在（已按此清理）。
-  以后再出现"历史脏了"，照这条路径走，不要指望 rewrite + force push。
-- **重建时顺手做的两件（2026-09-23）**：① 提交身份从个人邮箱改为
-  `105688024+Kanrw@users.noreply.github.com`（**只设在 repo-local config**，因为全局改会波及
-  使用者的其它仓库；新克隆不会继承，所以新克隆里提交会用全局邮箱 —— 别忘了）；
-  ② 历史里的 `.DS_Store` 一并清掉。**唯一的本地残留**是 WorkBuddy 自己的会话检查点引用
-  （`refs/agents/<session>/checkpoints/turn/*`）仍持有那两个 blob —— 那是工具状态、不在推送范围，
-  故未动（要清就 `git update-ref -d` 那两个引用后 gc，代价是丢该会话的检查点）。
+- **第 1 层必须扫 index 而不是工作树**：被 `git add` 之后又在磁盘上改干净的文件，提交进去的
+  仍是脏内容。这是"扫工作树"挡不住的一类绕过，别改回去。
+- **失败关闭，但只对"本该有档案却没有"生效**：`private/` **目录**在而档案读不出来 → 拒绝比对；
+  目录不在（新克隆 / 贡献者机器）→ 降级为模式判据，否则那边一个提交都做不了。
+- **禁止 `--no-verify`**。钩子能被绕过，所以 GitHub Actions 那道网必须留着。
+- 历史脏过的唯一解法是**删库重建**（重写历史 + force push 清不掉旧对象，GitHub 仍按旧 SHA 提供）。
+  完整路径、代价与"重建时顺手做的两件事"见 `docs/privacy.md`。
 
-钩子安装：`npm install` 会自动跑 `prepare`（`git config core.hooksPath .githooks`）。
-手工装：`npm run prepare`；确认：`git config --get core.hooksPath` 应回 `.githooks`。
+钩子安装：`npm install` 自动跑 `prepare`；手工 `npm run prepare`；确认 `git config --get core.hooksPath` 应回 `.githooks`。
 
 ## 二、工作纪律（stop-that-shit · 本项目适用条款）
 
-> 来源：用户级 skill `stop-that-shit`（lennney/stop-that-shit，MIT）。
-> 用户决策（2026-09-22）：本纪律写入 AGENTS.md 核心，约束本项目全部后续 agent。
-> 下面是它在 form-pilot 的落地条款，不是通用文本的复制。
+> 来源：用户级 skill `stop-that-shit`（lennney/stop-that-shit，MIT）。用户决策（2026-09-22）：
+> 写入本项目核心，约束全部后续 agent。**下面是条款速查；逐条论证、案例、以及"已删的守卫别再
+> 捡回来"清单见 `docs/discipline.md`。**
 
-### 2.1 责任先行
-
-动手前先答三问，答不出就不写代码：
-
-1. 本次交付对应哪条规划的哪句验收？
-2. 边界在哪（允许改哪些文件/函数，禁改哪些）？
-3. 已有的保证是什么（已实测结论、可运行原型）——改动必须保住它。
-
-### 2.2 直接方案优先，按需扩展
-
-- 先找项目里已有的可运行实现。`job-apply-v2/references/engine.md` 里的原型**已经能跑**，
-  加固是"改它"，不是"从零重写"。
-- 只有当直接方案**漏掉一个具体已存在的东西**时才扩展：具体的输入、具体的消费方、
-  具体的失败、具体的义务。**"以后换站点可能要用"不构成理由——假想灵活性不算当前需求。**
-- 已有的支持承诺算当前需求（例：六条安全边界、三道闸门、v1 降级链）；
-  纯粹的未来灵活性不算。
-
-### 2.3 每一层防御必须对应一个已命名的失败
-
-- 每加一层 try/catch、重试、探测、降级分支，必须能指着说"它挡的是 X 这个已发生或必然发生的失败"。
-- 对不上具体失败的层，不写。已经写了但说不清挡什么的，先查清调用路径再决定删不删——
-  查不清不等于该删。
-- 挡住真实失败的保护要保留，哪怕它让 diff 变大。
-
-### 2.4 本项目已判定的投机性建设（触发前不实现）
-
-以下条目已由 `docs/plans/04-reality-check-2026-09-22.md` 判定为投机建设。
-**在"触发条件"出现之前不实现、不写骨架、不写占位接口。**
-
-| 条目 | 触发条件（出现才做） |
+| 条款 | 一句话 |
 | --- | --- |
-| R5 `probeEnv` / shadow DOM / iframe 穿透 | 一次真实表单上发现字段被漏扫 |
-| R9 `snapshot` / `setPlan` / `diff` | 一次真实联动导致计划外字段变更，且外层 LLM 从 scan/readAll 差异里看不出来 |
-| R3 `setChoice` / 菜单"确定"钩子 | 北森（或首个自定义 radio 站点）实际投入使用 |
-| R8 版本守卫 / `_busy` 运行锁 | 出现第二次注入或并发调用的真实事故 |
-
-判据一致：**没有真实站点、没有真实事故，就没有需求。**
-
-> **已解锁并实现**：R4 `fillDate`（2026-09-22）。触发条件由用户直接给出——
-> 原始条件是"Moka `day_info` 实测证明可直接输入"，用户的指示更宽："很多网页的表单，
-> 特别是时间表单，可以直接填写而不用下拉"；并给了缺省规则：**只有年份没有月份的，先用 `01` 填**。
-> 实现见 §六。它不再属于本表。
-
-### 2.5 交付物聚焦
-
-- 报告只写：结果、必要后果、验证证据。
-- 不写未被要求的告诫性段落，不把内部过程笔记写进交付物。
-- 不确定的结论要收窄或标注来源，不要用免责声明包围；警告只在
-  "它改变读者如何使用结果"时给出。
-
-### 2.6 任务模式
-
-- `review` / `answer`：只读。不改文件。
-- `change`：只做被要求的改动及其必要后果。
-- 必要后果不覆盖明确的文件锁或更窄的边界；要越界先说明。
-
-### 2.7 完成即止
-
-结果存在 ＋ 所需证据支撑 ＋ 无已知范围内阻塞 ＝ 完成。
-**不要再加一轮审计循环来"满足纪律"**；复验要复用仍然有效的证据，不重复已通过的检查。
-
-### 2.8 双 agent 执行-监督（用户决策，2026-09-23）
-
-- 现场执行类任务（表单填写、桥接会话等有卡死/循环风险的实操）**必须双 agent**：一个执行，一个监督。
-  根因：执行者自己监工自己，轮次必然失控（2026-09-23 北森会话实测：同参数重试 3 次、payload 混用、
-  heredoc 变体踩坑，全部无外部否决点）。
-- 执行者每步向监督者发 ≤3 行状态（动作 / 结果 / 计数）；监督者只在违规或预算到点时发声，沉默 = 放行。
-- 监督者四条红线，触发即强制叫停，执行者不得以"再试一次"抗辩：
-  1. 同一类失败第 3 次 → 预警；第 6 次 → 强制跳过归类（manual / 待手动）；
-  2. 同一探测读数连续 3 次不变 → 判卡死，换路径或归类；
-  3. 同参数重试同一失败动作最多 2 次，第 3 次禁止；
-  4. 会话总预算 5 分钟，到点强制收尾出三清单（已填 / 待手动 / 待确认）。
-- 监督者不可用时，执行者降级为自带计数器（红线 1/3/4 仍生效）——监督是加强，不是单点依赖。
-- 纯文档 / 代码任务不强制双 agent：无卡死风险，加了反而违背 §2 的限时哲学。
-
-**监督者怎么起（2026-09-23 CVTE 会话实测踩坑）**：`run_in_background` ≠ 常驻进程。后台 agent 在自己
-这一轮无事可做时就结束这一轮——实测 spawn 后 8 秒退出，全程只发了一条"已就位"。要真常驻只有两条路：
-① 监督者自己跑阻塞等待循环（sleep 轮询状态文件）；② 执行者每步用 SendMessage 唤醒。
-**② 每步多一个完整 agent 轮次，5 分钟预算会被直接吃掉，禁止。**
-所以默认形态改为：**执行者自带计数器跑（红线 1/3/4 全生效），只在触线或单步超时时才 spawn 一次
-监督者做一次否决判断。监督是闸门，不是常驻心跳。**
-
-### 2.9 改动即提交（用户决策，2026-09-23）
-
-- **一处改动完成就提交 git**，不攒到"告一段落"。理由是多会话接力：未提交的工作区在下一会话
-  只剩 diff、看不出意图，还会和别的会话的未提交改动混成一个大杂烩 commit。
-- 一个逻辑主题一个 commit。来源不同 / 主题不同的改动必须拆开，哪怕它们同时躺在暂存区里。
-- 提交前跑 **`npm run check`**（= `npm test` + `check-private-leak`），全绿才提交。
-  隐私那半现在有 `.githooks/pre-commit` 自动兜底（见 §一 三层闸门），但**测试那半没人替你跑**。
-  **只跑 `npm test` 不够** —— 真值一旦进了 commit，后面再改当前树也**删不掉历史**
-  （2026-09-23 实证：有一次把两个档案值写进 AGENTS，隔一个提交才从工作树改掉，
-  历史里那份仍在，并随推送公开；最终只能靠删库重建清掉，见 §一）。
-  守卫的检查点必须是**提交前**，不是推送前。
-- 提交 ≠ 推送，默认只落本地。推送是另一个动作，且推送前必须验
-  `git ls-files | grep -E '^private/'` 输出为空（见 §一 隐私边界）。
-
-### 2.10 防御收窄（用户要求，2026-09-23）
-
-按 §2.3 逐层复核"这层防御对得上哪个已命名的失败"。结论：**引擎本体基本合格**
-（8 层守卫里 6 层指得出实测失败），问题集中在外层脚本。处置如下，**别把删掉的再捡回来**。
-
-**删掉（无调用方的开关 = 守卫里的后门 / 纯遗留）**
-
-- `check-private-leak.mjs --allow-missing-profile`：全仓只有它自己的报错文案提到它，零调用方。
-  删。要临时跳过就显式改用 `--patterns`（覆盖面更小，但留痕）。
-- `choose.mjs --dry` / `--tries`（flag 是死的，`TRIES` 常量留）、`filltext.mjs --dry`、
-  `choose.mjs` 里从未使用的 `readFileSync` 导入。
-- `check-private-leak.mjs` 对 `package-lock.json` 的排除：**真的取消后实测 tree/staged/patterns
-  三种范围都干净**，于是永久去掉。**排除清单现在是空的** —— 要加排除项必须先给出实测命中。
-
-**修（测试在替一份不运行的代码背书）**
-
-- `choose.mjs`：`matchOption` 有 6 例单测却**不在生产路径上**，页内另有一份语义不同的匹配器
-  （那份会"取第一个"）。改成：页内只负责取候选 + 打一次性标记，选谁一律回 Node 侧交给
-  `matchOption` —— **被测的就是在跑的那份**。顺带把"重复文本"从"取第一个"改成报
-  `option-ambiguous`，并新增开菜单前的 `closeOpenPanels()` 清残留面板（实测 `--options 到岗时间`
-  曾取回「学历」的候选；那种情况"取第一个"会把值点进**别的字段的面板**）。
-- `inject.mjs`：`--adapter` 名单与 `adapters.js` 注册项重复维护、只靠一条注释兜着（已漏过一次 feishu）。
-  改成导出 `KNOWN_ADAPTERS` + `tests/inject.test.mjs` 断言**双向相等**（多一个也红）；
-  顺手把 CLI 主体挪进 `main()` 并加 `invokedDirectly` 守卫，否则测试一 import 就被 `process.exit` 带走。
-
-**保留 + 补证词（复核推翻了我自己的两条判断，留档免得再被误删）**
-
-- `fillTexts` 的**自动重试**：我原判"无证据"，实际 `tests/golden.test.mjs` 有两条黄金用例
-  （吞值→重试→值真实粘住且 `retried` 如实上报；重试后仍被吞绝不报成功）。证据已写进 engine.js 注释。
-- `fillMonthRange` 循环内的数量复检：**不是**入口检查的重复 —— 下面按固定下标取 `list[i*2+k]`，
-  列表中途缩水会让下标**指到别的下拉**（静默点错），必须在取下标之前拦掉。
-  与 `!sel || !sel.isConnected` 的分工已写进注释：一个挡"索引会错位"，一个挡"取到的节点已失联"。
-- `beisen.manualTypes`：守卫保留（页内 `pickOption` 在北森确实打不开菜单），但**口径**改成
-  「引擎通道不可用」，**不等于人工** —— `scripts/choose.mjs` 走真实坐标点击可填（两站实测 11 中 9）。
-
-**这一轮的教训（写给下一个复核的人）**：**"找不到证据"经常等于"没找"**。这两条准备删的防御，
-证据都在仓库里（黄金用例、固定下标取法），只是不在代码旁边。
-所以复核动作的顺序必须是 **先 grep 全仓找证据，再决定删不删**。
-
-## 三、已完成的工作
-
-### 规划阶段（已完成）
-
-规划文档，`form-pilot/docs/plans/`：
-
-| 文件 | 内容 | 行数 |
-| --- | --- | --- |
-| `00-master-plan.md` | 总体规划框架，收拢 01/02/03 | ~120 |
-| `01-engine-architecture.md` | 引擎架构加固（9 项风险 + 接口 + 实施顺序） | 226 |
-| `02-adapters-testing.md` | 站点适配与持续学习策略 | ~95 |
-| `03-project-packaging.md` | 项目结构、打包与文档 | 152 |
-| `04-reality-check-2026-09-22.md` | 实况审查：AGENTS.md/01/02/03 对磁盘、git、桥接实测的逐条核对 | — |
-| `05-execution-architecture.md` | 执行路线与架构（终版，取代 00 的路线图与 03 的实施清单） | 279 |
-| `06-profile-ui.md` | 个人档案界面：路线 B（本地 Node 服务）+ 方向 A（向导已撤，见 §六）+ 投放版本（§十三 第六轮）；**已实施** | 545 |
-
-### 核心决定（用户决策，2026-09-22）
-
-1. **站点适配不做提前实测**——北森等需登录的系统，AI 无法注册/登录查看表单。
-   改为**在使用中持续学习**：现场探测 → 现场适配 → 用后沉淀。
-   记录在 `02-adapters-testing.md` §一、§二。
-2. 其他决定见 `03-project-packaging.md` §2-§8（同步方案C、单文件IIFE、
-   jsdom测试、MIT署名、issue回馈不PR、v1指南保留存档、git仓库化+轻量semver）。
-3. **采用 stop-that-shit 纪律**（见 §二）：不做投机性建设，交付物聚焦，完成即止。
-
-### 引擎原型（已验证，Moka 真实页面实测通过）
-
-位置：`~/.config/opencode/skills/job-apply-v2/references/engine.md`
-已验证的底层技法：
-- native setter + input/change 事件批量填文本，React 重渲染后值保持（已清测试数据）
-- 合成 mousedown/mouseup/click 可打开并选中 Moka 下拉菜单（无需 CDP 坐标）
-- Moka 选中值显示在 `[class*=sd-Input-display-value]`（input.value 恒为空）
-- Moka 字段容器 `[class*=apply-field]`，label 在 `[class*=title]`
-
-**验证时使用的 Moka URL**（某家真实校招申请页，仅探测未提交；此处只留形状，具体 org/jobId 不入库）：
-`https://app.mokahr.com/campus-recruitment/<orgSlug>/<orgId>#/job/<jobId>/apply`
-
-### 技能文件（已写入）
-
-`~/.config/opencode/skills/job-apply-v2/`：
-- `SKILL.md`（技能主文件，边界+流程）
-- `references/engine.md`（引擎代码+用法）
-- `references/adapters.md`（适配器注册表草案）
-- `agents/openai.yaml`（技能元数据）
-
-## 四、基础设施现状
-
-- Kimi WebBridge daemon：`http://127.0.0.1:10086/command`
-- 状态检查：`node scripts/status.mjs`（或 `~/.kimi-webbridge/bin/kimi-webbridge status`）
-- 启动：`~/.kimi-webbridge/bin/kimi-webbridge start`
-- macOS/Linux 调用模板：`curl -s -X POST http://127.0.0.1:10086/command -H 'Content-Type: application/json' -d '{"action":...,"args":...,"session":"..."}'`
-- Windows：内联 JSON 会乱码，必须用 `--data-binary @file`
-- **动作参数形状**（2026-09-22 实测）：`evaluate` 的参数名是 **`code`**，写成 `expression`
-  会回 `{"ok":false,"error":{"message":"evaluate: code is required"}}`；`navigate` 用
-  `{url,newTab,group_title}`；`screenshot` 用 `{path,fullPage}`，返回 `{format,path,sizeBytes}`
-  并把 png 落到磁盘。**这是零安装做"真实渲染核对"的路子** —— 不用装浏览器自动化工具，
-  直接开页 + `evaluate` 取 `getBoundingClientRect()` 就能核版式，`screenshot` 能拿到画面。
-- 固定 session 名约定：同一任务一个 session，如 `form-v01`、`adapter-research`
-- **写 payload 一律用 node 生成文件 + `--data-binary`，不要在 shell 里内联 JSON**（2026-09-22 实测）。
-  两个坑：① 内联 JSON 里的 `\n` 会被 shell 吃掉，正则直接变成 `Invalid regular expression: missing /`；
-  ② 中文与引号在多层转义下极易写坏。模板：
-  ```bash
-  node -e 'const fs=require("fs");fs.writeFileSync("/tmp/p.json",
-    JSON.stringify({action:"evaluate",args:{code:fs.readFileSync("/tmp/code.js","utf8")},session:"form-v01"}))'
-  curl -s -X POST http://127.0.0.1:10086/command -H 'Content-Type: application/json' --data-binary @/tmp/p.json
-  ```
-  代码写进 `code.js`，Node 负责转义 —— 正则与多行字符串都能原样送过去。
-- **动作参数可以空参调用反推**：`{"action":"upload","args":{}}` 会回
-  `upload: selector is required`，补上再调会回下一层缺什么。无需文档即可拿到参数表。
-  已探到的：`upload` = `{selector, files:[绝对路径]}`；`find_tab` 需要 `{url}`（传 tabId 会报
-  `find_tab: url is required`，url 写前缀即可匹配）。
-- **session → tab 绑定比想象中更易失**：实测一次会话里当前 tab 连续被关掉两次，
-  报错形如 `current tab <id> was closed; session still has tabs [...] — call list_tabs to re-target`。
-  恢复办法：`list_tabs` 看哪个 tab 还指向申请页 → `find_tab {url: 前缀}` 重新绑定。
-  **不要把 tabs 列表传给 evaluate**，evaluate 只认重新绑定后的当前 tab。
-- macOS 上**没有 `timeout` 命令**，用 `curl --max-time <秒>`。
-
-**桥接状态是当场读数，不是本文件的常驻事实。** 2026-09-22 发生过两次状态反转（10:11 daemon 被终止、
-11:35 恢复）——**每次使用前必须重新 `status`，不得引用任何历史值**。
-
-**session → tab 绑定是易失的。** 实测：tab 关闭后同一 session 的 `evaluate` 直接报
-`session "x" tab was closed — navigate first to recreate`。所以每个 session 的第一步永远是 `navigate`。
-`inject.mjs` 不负责导航，它只注入。
-
-**status 在 running 态的完整字段**（2026-09-22 实测）：
-`extension_connected, extension_id, extension_version, port, running, skills[], update_available{}, uptime_seconds, version`。
-`running:false`（缺 daemon）与 `extension_connected:false`（缺浏览器/扩展）是两种故障、两种修法。
-
-### ★ 目标标签页必须在前台（2026-09-22 实测）
-
-另外，**标签页内容本身也会变**（2026-09-22 实测）：一次会话中途，session 绑定的那个标签页
-被切到了别的站点，`apply-field-` 计数归 0、引擎丢失、适配器回落到 `generic`。
-所以每个写操作前，除 `document.hidden` 之外再加一句 `location.href` 仍在申请页上；
-`inject.mjs` 回的 `adapter` 从 `moka` 变成 `generic` 就是这个信号。
-
-**这是引擎的硬前提，不是建议。** Chrome 对后台标签页节流定时器，而引擎**每个**异步方法都靠
-`sleep`（`setTimeout`）驱动 —— 于是 `fillTexts` / `pickOption` / `fillDate` / `fillMonthRange` /
-`addRow` 全部变成**无限等待：不报错、不返回、也不超时**。这是最坏的失败形态。
-
-实测证据（同一次会话，同一标签页）：
-
-| 操作 | 后台（`hidden: true`） | 前台（`visible`） |
-| --- | --- | --- |
-| `await new Promise(r => setTimeout(r, 1500))` | **30 秒未触发** | 正常 |
-| 同步 `evaluate`（如 `pickOption` 走 `field-not-found`） | 秒回 | 秒回 |
-
-同步路径不受影响，所以"桥是通的、页面也在"会误导排查方向 —— **先查 `document.hidden`**。
-
-引擎已在每个异步方法入口加了前台守卫：命中返回 `err:'tab-hidden'`（`fillTexts` 保持
-`{ok,failed,retried}` 形状，`ok: 0` 且每个字段各报一条）。**局限**：挡不住"填到一半被切到后台"。
-不要试图用"给 `sleep` 加超时"来兜底 —— 那个超时定时器同样不会触发。
-
-### 后台标签页的两条修正（2026-09-23 实测，方正 PCB 会话）
-
-- **`Page.bringToFront`（cdp）不是"置前开关"，只在 Chrome 窗口没被完全遮挡时有效。**
-  实测序列：navigate 后 `hidden:true` → `cdp {method:"Page.bringToFront"}` → `hidden:false`
-  （够跑完一次同步 `evaluate`）→ 之后 WorkBuddy 窗口夺焦、Chrome 被完全遮挡 → `hidden` 回 `true`，
-  **再调 bringToFront 一次仍 `true`**。所以不要把"先 bringToFront 再跑异步方法"当成可依赖的流程；
-  Chrome 的遮挡判定（occlusion）在窗口未被看见时把页面按后台处理，定时器照样节流。
-- **桥的原生 `fill` 动作 `{selector, value}` 是 `hidden:true` 下唯一实测可用的写通道。**
-  它走扩展侧写入，**不吃后台定时器节流**。实测在 `hidden:true` 下写 4 个字段（含中文值），
-  2 秒后回读全部保持、无残留联想面板。用法：先用**同步** `evaluate` 给目标 input 打
-  `data-fp=*` 标记（同步路径不受 hidden 影响），再 `fill {selector:"input[data-fp=..]", value}`。
-  **局限（决定它只能当降级通道）**：它只写值，不做引擎的复合字段拒写、也不做回读自检 ——
-  用之前必须自己核"目标盒内可见 input 数 = 1"（北森手机号那类复合字段会写错位置），
-  用之后必须另发一次 evaluate 回读。**引擎的 `fillTexts` 在 hidden 下必然报 `tab-hidden`，
-  同参数重试上限 2 次（§2.8 红线 3）；第 2 次仍失败就换通道或转人工，不要试第三次。**
-
-### ★ 批量写入的静默错写（2026-09-23 苏纳 SUNA 会话，脚本已修）
-
-**失败形态**（本项目最贵的一类：报告写着"已验证"，实际写错了字段）：
-临时批量写入脚本给元素打 `data-fp=ft0/ft1/...` 标记后**没清理**，第二轮运行复用同一批标记名，
-页面上于是同时存在新旧两套同名标记 → `document.querySelector('[data-fp=ft0]')` 取的是
-**文档里第一个**匹配（第一轮写的「姓名」输入框）→ 第二轮要写的「获得证书」落到了姓名上，
-**姓名/学号/邮箱三个字段被证书文本/爱好/项目描述覆盖**。更糟的是回读也用同一个选择器，
-**读写两边错到一起**，所以第一轮报告是"14/14 已写入、回读一致"。
-发现方式：用引擎 `scan()` 与"按 label 取盒内真值"两条独立路径对读，出现 3 处不一致。
-
-**三条纪律（`scripts/filltext.mjs` 已内建，别退回）**：
-
-1. 开跑前**清掉本脚本自己用过的全部标记**（跨轮次残留是事故的直接原因）；
-2. 标记带**一次性随机前缀**（`run + i`），进程内不复用、跨进程不重名；
-3. **回读一律按 label 定位盒内元素**，绝不用全局标记选择器 —— 这是唯一能发现"写错字段"的读法。
-
-另两条实现坑：`label.innerText` 在 jsdom 里是 `undefined`（只有真浏览器才有），读 label 要
-`innerText || textContent`，否则定位逻辑根本没法单测；注入代码里别写 `'\n'`
-（Node 模板字符串会提前把它转成真换行，浏览器端直接 SyntaxError），用 `String.fromCharCode(10)`。
-
-`scripts/filltext.mjs` = 后台标签页下的**文本/文本域写入通道**（桥的原生 `fill`，不吃定时器节流，
-见上一节），用法 `--set "<字段>=<值>"`。它只写"盒内可见控件恰好 1 个"的字段，多于 1 个直接拒写
-（与引擎 `composite-field` 同一条纪律）。
-
-### 下拉触发器是"切换"语义（2026-09-22 实测）
-
-同一下拉**连点两次**，可见面板数 `0 → 1 → 0`：点击一个**已经打开**的触发器是把它**关掉**。
-结合另一条实测 —— `chooseIn` 失败后页面**会残留 1 个可见面板**（`body.click()` 关不掉它）——
-就有：一次失败留下残留菜单 → 下一次点同一触发器把它关掉 → `openMenuFor` 永远看不到新菜单 →
-报 `menu-not-open`，而页面其实是好的。**这才是 `closeMenus()` 存在的理由**，别删。
-
-**站点探针**（2026-09-22 新增）：`node scripts/probe.mjs --session <名> [--as <sel>] [--text] [--limit N]`
-在真实页面上**只读** dump 结构，输出 `containers[]`（候选容器 + `nested` 套娃数）与
-`types[]`（类型 token 的子树特征），供人整理成注册项。**不推荐、不打分、不写回 adapters.js** ——
-理由是"猜一个"的代价是静默填错，那是本项目历史上最贵的一类失败。
-默认不输出任何页面文本（`--text` 才输出并打 stderr 警告）。
-回归在 `tests/probe.test.mjs`（3 例）；裁定过程与"为什么这么薄"见 `docs/plans/07-probe-tooling.md`。
-**它不是 R5 `probeEnv`**：开发期工具，不进注入到用户浏览器的 bundle，不参与填写。
-
-## 五、适配器注册表
-
-文件：`engine/adapters.js` —— **已落盘**（IIFE 挂 `window.__jaAdapters`，幂等）。四个注册项：
-
-| 适配器 | verified | source | fieldSel |
-| --- | --- | --- | --- |
-| `moka` | `2026-09-22` | CATL 校招申请页（只读探测） | `[class*=apply-field-]` |
-| `beisen` | `2026-09-22` | 粤芯半导体校招申请页（L2+L3 部分，选择类控件未攻克） | `.form-item` |
-| `feishu` | `2026-09-22` | 记忆科技校招申请页（只读探测，L3 未跑） | `[class~="atsx-form-item"]` |
-| `generic` | `null` | `builtin` | 空（走引擎默认：input 就近容器） |
-
-**feishu 与 moka 的根本差异（2026-09-22 实测）**：类型写在**内部组件**类名上
-（`atsx-select-search` / `atsx-date-picker`），字段盒子只有 `atsx-form-item` 一个 token，
-且下拉 input 非 readonly —— 启发式的旧两条判据全部落空，typeMap 无从写起（盒子上没有类型 token）。
-**引擎为此新增了子树判据**（`heuristicType` 在 cls/readonly 之前查组件类名），
-同轮顺带覆盖了 Moka `bool_info` 那类失败。选择器必须用 `~=`（完整词匹配）：
-裸 `[class*=atsx-form-item]` 实测命中 156 个节点，真盒子只有 28 个。
-字段名事实源是 `<label>`；`[class*=fieldName]` 的 textContent 会混入已填值（"意向城市东莞"）。
-「意向城市」「手机号码」是**只读展示**（值来自账号资料，盒内无 input），scan 报 `unknown` 属正确语义。
-`起止时间` 是 `atsx-date-picker-period-month` 月区间 —— `fillMonthRange` 的第二个站点。
-
-**moka 的选择器（实测）**：
-
-```
-fieldSel         [class*=apply-field-]     ★ 尾横线不可省，见下
-labelSel         [class*=title]
-menuSel          [class*=sd-Select-menu],[class*=sd-Menu-container]
-itemSel          [class*=sd-Menu-content-item]
-valueSel         [class*=sd-Input-display-value]
-blockSectionSel  [class*=apply-block-]     区块
-blockGroupSel    [class*=apply-fields-]    行分组（行索引来源）
-rangeSel         [class*=month-range-select]          选择式月区间容器
-rangeSelectSel   [class*=sd-Select-container]         区间内 4 个下拉（起始年/月、结束年/月）
-addText          '添加'
-typeMap          string_info→text / select_info→select / bool_info→select /
-                 Select→select / multi_select_info→select / day_info→date /
-                 date_info→date / location_info→cascade / confirm_info→choice /
-                 file_upload→file / portrait_upload→file / custom_file_upload→file
-blockSections    edu 教育背景 / intern 实习经历 / proj 项目经验 / scholar 获奖学金经历 /
-                 campus 校内活动经验 / paper 核心期刊论文发表 /
-                 patent 个人专利/发明 / contest 竞赛经历 / skill 技能/爱好
-```
-
-**四条实测校正（2026-09-22，别再退回）**：
-
-1. **`fieldSel` 的尾横线**。裸 `[class*=apply-field]` 会同时命中 16 个复数行分组容器
-   `apply-fields-*`，把 wrapper 当字段（实测真字段 49 个 → 误报 65 个）。
-2. **`bool_info` 是下拉，不是文本框**。它是 `sd-Select-container` + `sd-Input-display-value`，
-   且 input **不是** readonly → 引擎的启发式（类名含 select？占位符含"请选择"且 readonly？）
-   两条都落空 → 会误判成 `text` → 往下拉输入框写值不生效且不报错。所以必须走 `typeMap`。
-   `location_info`（籍贯）同理曾是漏网之鱼。
-3. **加行按钮的文本是"添加"两个字，页面上 6 个按钮全叫这个**。规划里写的
-   `addRowText: '添加教育经历'` 不存在于 DOM。按文本匹配必然选错，只能区块内定位；
-   `addRow` 用"区块内定候选 → 取文本最短者 → 行分组计数 +1 验证"（见 §六 内部方法表）。
-4. **`menuSel` 的两个选择器是父子关系，不是并列关系。** `[class*=sd-Menu-container]` 命中的是
-   每个选项**外层容器**，而它就长在 `[class*=sd-Select-menu]` 面板内部 —— 点开「民族」一个下拉，
-   `visibleMenus()` 返回 **59** 个元素（1 个面板 + 58 个单项容器），不是 1 个。
-   表征：`pickOption` 失败报告里的 `menus` 字段会报 59，让人以为同时弹了 59 个菜单。
-   **修法在引擎侧**（`visibleMenus()` 做"嵌套只留最外层"），**不要删适配器里的
-   `sd-Menu-container`** —— 别的下拉形态可能只渲染后者，删了会静默少一类菜单。
-
-**北森实战记录（2026-09-22，粤芯 cansemitech.zhiye.com，L3 部分完成）**：
-
-- **已攻克**：div.phoenix-radio 单选（R3 setChoice，`--checked` 验证）；普通 `.phoenix-selectList`
-  下拉结构确认；`.form-item` + `label` 字段盒（与 v1 指南猜的一致）；「添加项目经历」等
-  加行按钮是 `sc-jeraig` 叶子 span，**合成 pointer 五件套点叶子才生效**（WebBridge 真实 click
-  会被解析到外层容器，点不动按钮）；fillTexts 批填 9/9 全中。
-- **未攻克（本会话约 25 轮调用）**：**editable select（`phoenix-select--editable`）全部免疫**，
-  覆盖日期下拉（开始/结束时间）与区域级联（籍贯/城市）。实测无效的通道：
-  ① native setter + input 事件；② WebBridge 真实 click + key_type；③ CDP `Input.insertText`
-  （focus 保持但值不落）；④ CDP `Input.dispatchMouseEvent` 真实坐标按下/抬起；⑤ 合成
-  pointer/mouse 五件套（点 input、点 `.phoenix-select__switchArrow` 都不开菜单）。
-  区域级联面板（`common-unmodeled-layer` + `area-text-label`）能开但点击只是导航，
-  勾选控件是行内 SVG 图标（`area-icon-RadioUnchecked`），同样点不动。
-- **★ 上述结论已被推翻（2026-09-23，方正 PCB `founderpcb.zhiye.com`）**：不是控件免疫，
-  是**那 25 轮尝试全打在视口外的坐标上**。实测那个触发器 `getBoundingClientRect().y = -1288`
-  （页面根本没滚到它）。唯一有效的通道就是**扩展的真实坐标点击**，顺序为：
-  `scrollIntoView({block:'center'})` → 桥 `click` 触发器 → 菜单**正常打开**
-  （选项是 `.phoenix-selectList__listItem`，面板可能挂在 portal 上，得按"出现在触发器正下方"
-  做 rect 就近过滤）→ 再桥 `click` 选项 → 应用侧 display 更新。**单场 9 个单选 8 中。**
-  落地成 `scripts/choose.mjs`（驱动层，见 §六 末）。**页内合成事件仍然无效**，别回去试。
-- **仍未攻克：多选**（选项里有「全选」、面板底部有 `.phoenix-button` 的「确定」）。实测
-  点选项 + 点确定后应用侧 display 仍是「请选择」（盒内也没有 chip 出现），2 次尝试后按
-  §2.8 红线放弃，归 manual。下一步该看 `.phoenix-selectList__listItem` 内部的勾选控件是什么节点。
-- **站内简历解析器是最大的填充者**：上传 PDF 后自动带入约 60% 字段（姓名/性别/手机/教育三段/
-  项目一/技能名与掌握程度/证书区骨架）。引擎的增量价值在解析器不覆盖的部分：
-  专业名称 ×3、实习区、加行后的 3 个项目组、全部技能描述——fillTexts 一次调用全中。
-  **旧口径"每个站点的 L3 第一步都是先传简历、等解析、再 rescan"已作废**，见 §七 的默认不填规则。
-- **教育段的港大交换（开始 2024-01）结束时间待使用者确认**，档案无此值，未瞎填。
-
-## 六、引擎 API
-
-文件：`engine/engine.js` —— **已落盘**。全部挂 `window.__ja`，单文件 IIFE，幂等。
-标 ⏸ 的条目按 §2.4 推迟：**触发条件出现前不实现，也不在 engine.js 里留占位或骨架。**
-
-```
-__ja.version                                   → '0.1.0'（三处一致，见 §十 同步方案）
-__ja.use(adapter)                              → adapter.name（Object.assign，可重复调用）
-__ja.detect()                                  → 'moka' | 'beisen' | 'generic'
-__ja.scan()                                    → {total, fields:[{id,block,label,type,required,value}],
-                                                  manual:[{id,type,reason:'adapter-manual'}],
-                                                  emptyRequired:[id]}__ja.readAll()                                 → [{id,block,label,type,value}]
-__ja.addRow(kind)                              → {ok,kind,from,to,added} | {ok:false,err:'section-not-found'
-                                                  |'add-button-not-found'|'row-not-added'|...}
-__ja.fillTexts(map)                            → {ok:number, failed:[{id,phase,err,attempted,final}],
-                                                  retried:[id]}
-__ja.pickOption(id, text, {search=true})       → {ok,value} | {ok:false,err:'field-not-found'
-                                                  |'manual-required'|'menu-not-open'
-                                                  |'option-not-found'|'item-detached'}
-__ja.fillDate(id, 'YYYY-MM-DD')                → {ok,wrote,after,unfilledInputs} | {ok:false,err:
-                                                  'field-not-found'|'not-a-date-field'|'manual-required'
-                                                  |'bad-ymd'|'select-based-date'
-                                                  |'no-date-inputs'|'input-count-mismatch'
-                                                  |'readonly-unverifiable'|'not-stuck'}
-__ja.fillMonthRange(id, from, to)              → {ok,from,to,picks,assumed?,displayAfter?} | {ok:false,err:
-                                                  'field-not-found'|'not-a-month-range'|'bad-ym'
-                                                  |'range-selects-missing'|'select-detached'|'menu-not-open'
-                                                  |'option-not-found'|'item-detached'|'display-not-updated'}
-⏸ __ja.probeEnv()      ⏸ __ja.snapshot()      ⏸ __ja.setPlan(ids)
-⏸ __ja.setChoice(id,v) ⏸ __ja.diff()
-```
-
-- **版本号仍是 `0.1.0`，即使接口已经涨过两次**（`fillDate`、`fillMonthRange`）。
-  D-5 的三处版本号里有两处（`skill/SKILL.md` frontmatter、`CHANGELOG.md`）是 Phase 3 的交付物，
-  目前还不存在。现在单方面把 `engine.js` 提到 `0.2.0`，只会造出一个"三处不一致、
-  却没人能跑 `--check` 断言"的状态 —— 版本对齐跟 Phase 3 一起做。
-- `type` 枚举：`text | textarea | file | select | date | cascade | choice | unknown`。
-  `fillTexts` 只处理 `text`/`textarea`，其余跳过并在 `failed[].err` 里归类为 `not-text:<type>`。
-- **3-5 分钟哲学的机制化（2026-09-22 晚，北森复盘三项修复，82 例测试）**：
-  1. **manualTypes**（适配器声明，如北森 `['select','date','cascade']`）——scan() 直接把
-     这些类型归入 `manual` 清单；pickOption/fillDate 在**入口**即报 `manual-required`
-     快速失败，不进入开菜单/等待循环。杜绝"换个通道再试 25 轮"复发。
-     `emptyRequired` 只收 manual 之外的空必填，两个清单合起来就是使用者的人工待办。
-     **★ 口径（2026-09-23 更正）**：`manual` 的含义是「**引擎填不了**」，**不等于「只能人工」**。
-     北森那类自定义下拉可以交给 `scripts/choose.mjs`（真实坐标点击，两站实测 11 中 9）。
-     正确流程是：scan → 非 manual 的走引擎 → manual 的先试 choose.mjs → 驱动也填不了才进人工待办。
-     照旧读成"这一列都得我自己点"，会把本来能自动化的字段白推给使用者。
-  2. **复合字段拒绝写入**（修复"报 ok 实际填错"的静默缺陷）：盒内有多个可见 input 且
-     适配器未声明 `numberInputSel`（角色选择器）时，fillTexts 报 `composite-field` 拒写，
-     一个字节都不落。声明了角色选择器则写入与回读走同一个 `pickInput()`——
-     自检不再"两边错到一起"。Moka 手机号未实测类名，**不声明**——它会明确失败而不是静默填错。
-  3. **解析值沿用 + 核对**（见 §七修订）：scan 的 `emptyRequired`/`manual` 分组就是
-     提交前的核对清单，取代"解析输出一律不用"的旧策略。
-- **日期字段多为"年/月/日"若干文本框，不是下拉 —— 先试直填，别默认走 `pickOption`。**
-  缺月份的按用户规则用 `01`（`2022` → `2022-01`），补了什么在 `assumed` 里报出。
-  区间字段只填起始、结束留空即"至今"，未填个数在 `unfilledInputs` 里报出。
-- **但三种形态里有一种是选择式的，`fillDate` 盖不住：「月区间」用 `fillMonthRange`。**
-  实测 Moka 的 `date_info` 有**两个变体，同名组件不同下拉数**：
-  「就读时间」= 4 个下拉（起始年/月 + 结束年/月，**一个文本框都没有**）；
-  「毕业时间（月）」「英语证书获得时间」= **2 个下拉（年 + 月，单月不是区间）**。
-  容器类名都是 `month-range-select`。
-  `fillDate` 在这类字段上会先往下拉内部的 input 里写字、再报 `display-not-updated` ——
-  结论没错（没谎报成功），但控件已被污染。所以 `fillDate` 现在**动手之前**就识别并返回
-  `select-based-date`，并指名该用 `fillMonthRange`。
-  `fillMonthRange(id, from, to)`：**`to` 传空串 = 单月（只用 2 个下拉）/ 至今**，
-  传起止 = 区间（用 4 个下拉）；下拉数不足报 `range-selects-missing` 而不是硬填。
-  月份越界（如 `2023-13`）在这一层就 `bad-ym` 拦掉 —— 放过去会走到下拉里报
-  `option-not-found`，把排查引向站点改版，而真凶通常是档案里的日期写错了。
-- **「学校名称 / 专业名称」是联想输入（type-ahead），不是普通文本框（2026-09-22 实测）。**
-  这两个字段下面挂着候选面板。实测看到的内容：
-  学校 = `<示例大学>` / `<示例大学>继续教育学院` / `<示例大学>网络教育学院` / `<示例学院>`；
-  专业 = `<示例专业>` / `物理学` / `没有找到专业？添加专业全称`。
-  （此处只记录控件形态，真实候选值属个人数据，不入库。）
-  `fillTexts` 只把文本写进 input，**不从候选里确认**，后果有两层：
-  ① 值不被应用正式接受（看着填好了，应用不一定认）；
-  ② **候选面板一直挂在页面上** —— 实测使用者因此在操作表单时被反复干扰，
-  最后手动清空了 `学校名称` ×2 与 `专业名称` ×1（原话："下拉选项一直浮现"）。
-  **正确做法**：写完文本后从候选面板里**点选对应项**让应用确认，然后收起面板。
-  `pickOption` 的"点触发器 → 选菜单项"正好是这个动作，但**尚未在联想输入上验证过**。
-  注意候选值未必等于档案值（档案写 `<示例专业>（<示例班>）`，候选只有 `<示例专业>`），
-  这种不一致不要自作主张改数据，要走确认。
-- **级联（如「籍贯」）按 `01 §R4` 既定策略一律 manual**：三级面板 + 异步加载 + 重名地区
-  （全国几十个"朝阳区"），自动化收益低风险高。实测它表现为一个 readonly 输入框
-  （placeholder `请输入籍贯`），合成点击没能唤出面板 —— 更该留给使用者手动。
-- **★ 一个字段盒子里可能有多个 input，「取第一个」是错的（2026-09-22 实测，使用者发现）。**
-  Moka 的「手机号码」是 **国际区号（`+86`）+ 号码输入框** 的复合形态。`fillTexts` 写的是
-  `box.querySelector(A.textInputSel)` —— **盒子里第一个 input，也就是区号那一个**；
-  实测把整个 `<11位号码>` 灌进了 `+86` 的位置。
-  更糟的是 `valueOf` 读的也是第一个 input，**写入与回读都指向同一个错的地方**，
-  于是 `fillTexts` 报 `ok: true`，**自检完全失效** —— 这是"两边错到一起"的失败，比明确报错危险。
-  修法方向：适配器给这类字段声明**角色选择器**（如 `numberInputSel`），按角色定位而不是按序号。
-  **未修之前不要往这类复合字段写完整值。**
-- **★ 日期字段的形态是站点级差异，必须靠适配器声明，引擎不要猜（2026-09-22 实测三种）**：
-
-  | 站点 · 字段 | 形态 |
-  | --- | --- |
-  | Moka「就读时间」「毕业时间（月）」「英语证书获得时间」 | **选择式月区间**：`month-range-select`，2 个下拉（单月）或 4 个（区间） |
-  | Moka「项目经验 起止时间」 | **年 / 月 / 日 各一个独立框**（区间 = 两组共 6 框） |
-  | 北森 | **一个框内完成年月日选择**（单个 picker） |
-
-  本次踩的坑：`scan()` 把「起止时间」报成 `type: 'text'`，我照着当文本框填了
-  `2021-09 -- 2024-06` —— 全错。
-  **判据：填日期前先看 DOM 里到底有几个框、是不是下拉，不要只看 `type` 字段。**
-  `type` 是启发式/类名映射推出来的，它说 `text` 不代表真的只有一个文本框。
-- **日期字段最容易撒谎的一点：值可能根本不在 `<input>` 上。**
-  实测 Moka `就读时间`：`input.value` 写进去了、重渲染后还在，但应用把真实值渲染在
-  `sd-Input-display-value` 里且**那几个是空的** —— 看起来填好了，提交时是空的。
-  所以规则是：**字段内存在 display 元素时，一律以 display 为准**（`verifiedBy:'display'`），
-  它为空的场景返回 `display-not-updated`；没有 display 元素才回退到 input 比对（`verifiedBy:'input'`）。
-  不要用 `readonly:false` 反推"能直填" —— 这个结论我犯过一次，见 04 审查的教训。
-- **只读日期控件（如 Moka `出生日期`）一律 `readonly-unverifiable` 转人工**，见 `fillDate` 注释。
-- `phase` 枚举：`locate | fill | verify`。
-- **文件上传不经引擎**：JS 拿不到 File 对象，走桥的 `upload` 动作，引擎不提供上传接口。
-- `scan`/`readAll` **没有分页参数**（§2.4 已删）。返回值超限再说。
-
-### 选择类字段的驱动：`scripts/choose.mjs`（2026-09-23）
-
-R3 `setChoice` 的触发条件（北森实际投入使用）已在方正 PCB 的真实投递中满足，但它**没有**落地成
-`__ja.setChoice`，而是落在驱动层 —— 有效通道是扩展的真实坐标点击，页内拿不到。这是
-§八 降级链的第 2 步（CDP 坐标点击）被走通，不是第 1 步（合成事件）复活。
-
-```
-node scripts/choose.mjs --session <名> --options "<字段>"          # 只开菜单导选项，不选
-node scripts/choose.mjs --session <名> --set "<字段>=<值>" ...      # 逐个开→点→回读
-node scripts/choose.mjs --session <名> --set "学历#2=硕士研究生"    # #n = 第 n 个同名字段（1 起）
-```
-
-- 每个字段的**标记与点击必须原子**：`data-ch` 标记跨一次桥往返就可能被 React 重渲染换掉节点
-  （实测 `click: element not found: [data-ch=opt]`）。别把"标记"和"点击"分到两次 agent 调用里。
-- 回读走应用侧 display（`verifiedBy: 'display'`），不看 `input.value` —— 与引擎同一口径。
-- 选项匹配：精确 → 去括号/空格 → 唯一包含；**≥2 个候选报 `ambiguous` 而不是挑一个**，
-  一个都不命中就报 `none` 并把选项列表回给调用方去人看。纯函数有单测（`tests/choose.test.mjs`，11 例）。
-- 菜单异步渲染的重试靠**多次桥往返**（每次往返本身就是真实等待），不用定时器 ——
-  后台标签页里定时器被节流，那正是引擎 `tab-hidden` 的成因（见 §四）。
-
-**内部方法命名（固定，不许现编）**：
-`sleep / norm / trunc / j / setNativeValue / synthClick / fields / labelOf / heuristicType / typeOf /`
-`firstTitle / rowIndexOf / sectionOf / sectionByKind / groupCount / readSelect / valueOf /`
-`isRequired / entries / findField / visibleMenus / menuItems / matchItem / closeMenus / openMenuFor / chooseIn`
-
-内部规约（不可违反）：
-- 元素引用不得跨 sleep 复用（stale 免疫）
-- 菜单操作必须串行 —— 由调用方保证；引擎 0.1.0 **不加 `_busy` 锁**（见 §2.4 R8）
-- 返回值一律 compact `JSON.stringify`，无空格；**所有**字符串字段截断 200 字符
-  （含失败报告里的 `attempted` / `final`）
-- `firstTitle` 固定用宽选择器，不用 `A.labelSel`：区块标题的父元素类名各站点不同，
-  而标题在 DOM 序上先于区块内字段
-
-## 七、适配器字段 ID 格式
-
-```
-<kind>[<rowIndex>]>><label>    # 区块命中（kind 来自适配器 blockSections）
-main>><label>                  # 非区块字段
-main>><label>#<n>              # 同上，但 label 在同一次 scan 内重复（n≥2）
-<label> / <label>#<n>          # 适配器未声明 blockSections 时的降级形态
-```
-
-Moka 实测样例（2026-09-22）：
-
-```
-edu[0]>>学校名称       edu[0]>>就读时间     edu[0]>>受教育类型    edu[0]>>学历
-edu[0]>>院系           edu[0]>>专业名称     edu[0]>>研究方向      edu[0]>>GPA
-intern[0]>>是否有实习经历                    skill[0]>>英语等级
-main>>推荐码           main>>是否内推        main>>上传简历
-```
-
-**4 级结构（实测）**：`apply-blocks-*`(1) → `apply-block-*`(16 个区块) → `apply-fields-*`(行分组)
-→ `apply-field-*`(49 个字段)。`kind` 由区块标题前缀匹配 `blockSections` 得出；
-`rowIndex` 是该字段所在行分组在区块内的序号（0 起）。
-
-**ID 必须单射。** 它是 `fillTexts(map)` 的 key，重名即静默填错字段。
-Plan 01 R2 原本只对 `main` 前缀消歧，实测发现非重复区块之间也可能撞名，故 `main` 分支同样加 `#n`。
-**已验收**：Moka 页 scan → `total 49 / unique 49 / duplicate 0`。
-
-**已知的结构变更源（都会让 ID 漂移，必须重新 scan）**：
-
-| 变更源 | 实测影响 |
-| --- | --- |
-| 站内"添加一行" | 未验收（`addRow` 还没在真实页跑过） |
-| **上传简历触发站内解析** | **已实测（2026-09-22 Moka）**：教育经历 1 → 3 行、项目经验 1 → 3 行，字段总数 49 → 67（稳定后；此前记的 56/68 是解析中途的读数）；解析器还会**覆盖已填字段**，清掉了我先填的 `学校名称`／`研究方向`／`是否有项目经验` |
-
-> **硬规则（2026-09-23 修订，用户决策）：默认不上传简历。**
-> 旧规则"上传简历是整个流程的第一步"已作废 —— 多数站点的解析器会**重新解析并覆盖表单里已有内容**，
-> 在已经有正确值的表单上再传一次等于自毁。实证：方正 PCB 重传后本科被拆成两行（行3 的专业名
-> 变成了简历里的"培养类型"、行4 丢了学校名称）；Moka 实测同源，解析清掉了我先填的
-> `学校名称`／`研究方向`／`是否有项目经验`。
->
-> 现在的口径，按顺序：
-> 1. **先 scan，看这页已经有什么**。有值的字段不会因为传简历变得更多。
-> 2. **只在两种情况下上传**：① 表单**全空**且没有更省的填法；② 使用者明确要求。
-> 3. 传完必须等解析稳定（实测 **4 秒内**）→ rescan → **逐字段核对解析覆盖或改写了什么**，
->    尤其是日期与带"培养类型"的教育行（见 §十三 已知副作用）。
->
-> **ATS 简历 PDF 模组（§十三）默认不启用** —— 它是按需调用的工具，不是流程的第一步。
-
-> **旧版原文（留档，别再照做）**：「上传简历是整个流程的第一步，等解析跑完、结构稳定后再
-> scan、再填。反过来做，等于把自己刚填的内容交给解析器覆盖。」——这条只对"表单全空"成立。
-
-### ★ 站内解析输出：逐字段核对后可沿用（用户决策修订，2026-09-22 晚）
-
-> 旧版（Moka 实测后）：「解析的输出一律不用」。北森实战（同日，粤芯）推翻了一刀切：
-> 解析自动填对约 60% 字段（姓名/性别/手机/教育三段/项目一/技能名与掌握程度），
-> 引擎实际只补解析不覆盖的 22 个文本字段（批填全中）。两个站点数据相反，
-> 说明**解析质量是站点变量，不是常量** —— 策略从"不用"改为"沿用 + 核对"。
-
-**规则（3-5 分钟哲学：把轮次花在增量上，不花在重填上）**：
-
-1. **"不重传"与"沿用解析值"是两件事**：站点自带的解析结果（或使用者早先传过的那次）直接
-   rescan 沿用；默认**不再上传**，见本节开头的硬规则。只有在表单全空时才考虑上传。
-2. **解析值默认沿用**，不再全量重填。
-3. 提交前核对靠 scan 的两个分组（2026-09-22 机制化）：
-   `emptyRequired`（空必填，必须处理）+ `manual`（适配器免疫类型，直接归手动）。
-   核对动作 = readAll 输出与档案逐字段比对，使用者过目后再提交。
-4. **教育行的口径污染警告保留**（Moka 实测）：解析按简历的切法生成行
-   （本科 / 硕博连读 / 境外交流），档案的切法是（本科 / 硕士 / 博士）。
-   行切法不一致时**以档案为准重排**，不要围绕解析的切法分析。
-5. 日期类解析痕迹仍不可信（Moka 实测：写入的 `01` 被应用解成"暂无选项"，
-   input.value 有值、应用侧为空）——日期字段核对时以应用侧显示为准，不看 input.value。
-
-Moka 旧数据留档（89 字段那次）：解析填对 6 个（≈7%）、填错 4 个、
-教育三段该填的全空。那次"沿用不划算"的判断在当时成立；机制化之后，
-沿用与核对的成本由 scan 分组兜底，不再依赖会话现场判断。
-
-**未验收**：`addRow` 之后的 ID 稳定性（加一行 → 出现 `edu[1]>>` 且 `edu[0]>>` 不变）。
-
-## 八、故障降级链
-
-合成事件 → CDP 坐标点击（`Input.dispatchMouseEvent`）→ 列入"待用户手动清单"
-（不在一个控件上反复重试）。
+| 2.1 责任先行 | 先答三问（哪条验收 / 边界在哪 / 保住什么既有保证），答不出不写代码 |
+| 2.2 直接方案优先，按需扩展 | 已有能跑的就改它；只有漏掉**具体已存在**的东西才扩展，"以后换站点可能要用"不算理由 |
+| 2.3 每层防御对应一个已命名的失败 | 指不出挡哪个失败的层不写；挡住真实失败的要留，哪怕 diff 变大 |
+| 2.4 投机性建设清单 | 触发前不实现：R5 `probeEnv`/shadow DOM/iframe · R9 `snapshot`/`setPlan`/`diff` · R3 `setChoice` · R8 版本守卫/`_busy` 锁。（R4 `fillDate` 已解锁并实现，不再在表内） |
+| 2.5 交付物聚焦 | 只写结果、必要后果、验证证据；不写未被要求的告诫性段落 |
+| 2.6 任务模式 | `review`/`answer` 只读不改文件；`change` 只做被要求的改动及其必要后果 |
+| 2.7 完成即止 | 结果 + 证据 + 无阻塞 = 完成；不要为"满足纪律"再加一轮审计循环 |
+| 2.8 双 agent 执行-监督 | 现场执行类任务（表单填写、桥接会话等有卡死风险）必读，见下 |
+| 2.9 改动即提交 | 一个逻辑主题一个 commit；提交前跑 `npm run check`，不攒到"告一段落" |
+| 2.10 防御收窄 | 已按 §2.3 复核处置过的守卫，清单见 `docs/discipline.md`，别把删掉的捡回来 |
+
+**§2.8 的四条红线**（监督者触发即强制叫停，执行者不得以"再试一次"抗辩）：
+
+1. 同一类失败第 3 次 → 预警；第 6 次 → 强制跳过归类（manual / 待手动）；
+2. 同一探测读数连续 3 次不变 → 判卡死，换路径或归类；
+3. 同参数重试同一失败动作最多 2 次，第 3 次禁止；
+4. 会话总预算 5 分钟，到点强制收尾出三清单（已填 / 待手动 / 待确认）。
+
+监督者的默认形态是**闸门，不是常驻心跳**：执行者自带计数器跑（红线 1/3/4 全生效），只在触线或
+单步超时时 spawn 一次监督者做否决判断 —— `run_in_background` ≠ 常驻进程（实测 spawn 后 8 秒自己
+结束）。纯文档 / 代码任务不强制双 agent，加了反而违背限时哲学。
+
+**§2.9 的落点**：提交前跑 **`npm run check`**（= `npm test` + 隐私守卫）。**只跑 `npm test` 不够**
+—— 真值一旦进了 commit，改工作树也删不掉历史（2026-09-23 实证：两个档案值写进 AGENTS，隔一个
+提交才从工作树改掉，历史里那份仍在并随推送公开，最终只能删库重建）。守卫的检查点必须是**提交前**。
+提交 ≠ 推送，默认只落本地。
 
 ## 九、项目结构
 
@@ -775,219 +176,46 @@ form-pilot/
     └── plans/            # 00–06：规划、审查、执行路线、档案界面
 ```
 
-## 十、同步方案（唯一事实源）
-
-采用构建脚本单向同步（方案C）：`scripts/sync-skill.mjs` 把 `engine/*.js` 复制为
-`skill/references/*.js`（注入 GENERATED 头，禁手改），生成物提交进 git，
-再整树部署到 `~/.config/opencode/skills/job-apply-v2/`。`--check` 只 diff 不写。
+> **2026-09-24 补**：`docs/` 下新增 7 个从本文件拆出的全文文件（`privacy` / `discipline` / `history` /
+> `bridge` / `stations` / `engine-api` / `modules`），上文"docs/（plans 00–07 + profile-template）"
+> 与实际不符，以本节 + 文末「文档地图」为准。
 
 ## 十一、进度与下一步
 
-**路线图的唯一事实源是 `docs/plans/05-execution-architecture.md` §六**（主线三个 Phase，各自独立可合并）。
-个人档案界面是**并行支线**，不依赖桥接，唯一事实源是 `docs/plans/06-profile-ui.md` §八。
-本节只记进度，**不重复那两份列表**——三份执行清单必然漂移。
+**路线图的唯一事实源是 `docs/plans/05-execution-architecture.md` §六**（主线三个 Phase，各自独立
+可合并）；个人档案界面是**并行支线**，唯一事实源是 `docs/plans/06-profile-ui.md` §八。
+本节只记状态摘要，**不重复那两份列表**（三份执行清单必然漂移）；逐条验收明细见 `docs/history.md`。
 
-### Phase 1 · 骨架 + 引擎可注入 —— 已完成（2026-09-22）
-
-| 验收 | 结果 |
+| Phase | 状态 |
 | --- | --- |
-| `node scripts/status.mjs` | `{"ok":true,"running":true,"extension_connected":true}`，exit 0 |
-| `node scripts/inject.mjs --session form-v01` | `{"ok":true,"engine":"loaded","adapter":"moka","version":"0.1.0"}`，exit 0 |
-| 真实 Moka 页 `__ja.scan()` | `total 49 / unique 49 / duplicate 0`；ID 形如 `edu[0]>>学校名称`；类型经 `typeMap` 映射 |
+| 1 · 骨架 + 引擎可注入 | **已完成（2026-09-22）**：真实 Moka 页 `scan()` 报 `total 49 / unique 49 / duplicate 0` |
+| 2 · 填写闭环 | 代码与测试已完成；**真实页受控写验收未做** —— 它必须使用者在场监督，且停在提交前 |
+| 3 · 分发与文档 | **未开始**。与桥接完全解耦，桥不可用时它就是唯一能推进的部分 |
+| 支线 · 个人档案界面 | Phase 1 + Phase 2 已落地（`profile.mjs --ui`）；窄屏断点与 7 条人工待核对项未做（不阻塞主线） |
 
-**已知未验收项**：`addRow` 的"加行后 ID 不漂移"需要一次受控写，属 Phase 2。
-`findField` 的定位往返也没在真实页验过（公开 API 没有只读的定位入口，写了就是改表单）——
-它进 Phase 2 的 jsdom 用例。
+`package.json` 的 `scripts.test` 必须是 `node --test`（**不带路径参数**）—— Node 22 会把路径参数
+当模块加载并报 `Cannot find module '…/tests'`。03 §4 里写的调用形式是错的。
 
-### Phase 2 · 填写闭环 —— 代码已完成，**受控写验收未做**
-
-已落盘：`scripts/capture-fixture.mjs`、`tests/helpers/jsdom-setup.mjs`、`tests/engine.test.mjs`、
-`tests/fixtures/moka.html`、`tests/manual-e2e.md`。
-
-| 验收 | 结果 |
-| --- | --- |
-| `npm test`（engine 部分） | 11/11 通过（detect / scan 字段数与单射 / 区块前缀与类型 / fillTexts 分类 / 行级定位 / main 重名 / fillDate 5 例） |
-| `node scripts/capture-fixture.mjs --session … --site moka` | `{"ok":true,"fields":59,"pageFields":59,"rootTag":"BODY"}` |
-| 真实页受控写（批量填 + 下拉 + 加行 + 回读） | **未做** |
-
-**受控写必须用户在场监督**，且停在提交前。它是 Phase 2 的真正完成判据，
-`tests/manual-e2e.md` 的 moka 一节就是它的清单。
-
-`package.json` 的 `scripts.test` 从 `node --test tests/` 改成 `node --test`：
-Node 22 把路径参数当模块加载，报 `Cannot find module '…/tests'`。03 §4 里写的调用形式是错的。
-
-### Phase 3 · 分发与文档 —— 未开始
-
-与桥接完全解耦。桥不可用时它就是唯一能推进的部分。
-
-### 个人档案界面（并行支线）—— Phase 1 + Phase 2 已落地（2026-09-22）
-
-唯一事实源：`docs/plans/06-profile-ui.md`（§八 Phase 划分、§十三 六轮实施记录）。
-**与主线完全解耦**：不触碰 `engine/`，不新增 `__ja.*` 接口，`fillTexts(map)` 的契约不变。
-
-表格式的字段清单**不在本文复制**——唯一来源是 `tools/profile.schema.mjs`（14 区段 / 86 字段位）。
-
-| 验收 | 结果 |
-| --- | --- |
-| `npm test`（profile 部分） | 34/34 通过 |
-| `--import` / `--check`（真实档案） | `matchedFields 78`、`notes []`、`errors 0`、`warnings 0`、`completeness 174/184`（第七轮拆 `emergencyContact`、第八轮加 `hobbies` 之后） |
-| `--render` 泄漏检查 | `证件号码` 只出现在「待你手动」清单，不进任何值表 |
-| 路径守卫 | `<root>/private/` 之外的写入被拒，退出码 1 |
-| `--ui` 真实浏览器核对 | 三栏 210/769/240 且无横向溢出；围栏存在含 1 行；完整度 `25/57` 与服务端一致 |
-
-**未做**：窄屏断点（768 / 1024）未实测；`tests/manual-e2e.md` 档案那节的 9 条人工核对
-只过了 2 条（#1 三栏比例、#2 朱砂围栏），其余 7 条待补。这 7 条属人工核对，不阻塞主线。
-
-**`private/` 不在本工作区**（gitignored，每个 checkout 各一份 —— `06 §一` 的 F5 就是这条漂移风险）。
-真实档案在哪个 checkout 就用 `--root <该处>` 指过去；在别处跑 `--ui` 看到空档状态是正常现象，
-不是数据丢了。
+**已知未落盘**：`skill/` 整个目录、`scripts/sync-skill.mjs`、`docs/guide-v2.md`
+（三者都在 `docs/plans/03` §6/§9 里被当成交付物，仓库里没有 —— 见 CHANGELOG「已知未完成」）。
 
 ### git
 
-分支 `main`。提交粒度按"一个可独立回退的单元"，不按时间：
-仓库基线 → engine/ → scripts/ + 文档 → 隐私边界 → Phase 2 测试与 fixture。
-
+分支 `main`。提交粒度按"一个可独立回退的单元"，不按时间。
 **推送前必查**：`git ls-files | grep -E '^private/'` 必须为空。
+本机推 GitHub **必须走代理**（直连不通）：`HTTPS_PROXY=http://127.0.0.1:7897 git push`。
 
-## 十二、jobmatch 模组（岗位筛选）
+### 文档地图（按"什么时候读"排）
 
-独立于引擎的功能模组，2026-09-22 落地并在真实站点跑通。它回答"值不值得投"，
-引擎回答"怎么填" —— 两者不共享代码，只通过"筛选结论 → 投放版本 → fillTexts(map)"衔接。
-
-**文件**
-
-| 文件 | 职责 |
+| 文件 | 何时读 |
 | --- | --- |
-| `jobmatch/schema.mjs` | 枚举（GATE / STATUS / VERDICT）、文本归一化、JD 门槛线索抽取 |
-| `jobmatch/filter.mjs` | 确定性核心：档案→事实、档案→词典、四道闸门、命中、四档结论、排序 |
-| `jobmatch/sites.mjs` | 站点注册表（当前 `feishu`，已实测）+ 无匹配时的通用嗅探 |
-| `jobmatch/fetch.mjs` | 桥接编排：network start → navigate → list → detail → 解析 |
-| `scripts/match.mjs` | CLI：`--fetch` / `--screen` / `--sites` |
-
-**通道是 network，不是 DOM。** 实测原因：记忆科技飞书站的 `.positionItem` 卡片里只有岗位职责，
-`requirement`（学历 / 专业 / 年限）完全缺失；而门槛恰恰写在 requirement 里。
-直连站点 API 也不行 —— 请求带 `_signature`，缺了会被网关丢到"字节跳动猎头平台"的 fallback 页（状态码还 200）。
-所以借页面自己发出的 JSON。`?limit=100` 一次取全 75 条，不需要翻页。
-
-**四道闸门**：地点 / 学历 / 年限 / 专业方向，逐项 `pass / fail / unknown`。
-`unknown` 既不淘汰也不放行；任一 `fail` 直接落到"暂不建议投递"，不被命中数加权抵消。
-不产出百分比分数（照 asu-skill `job-match` 的规则，伪精确分数是误导）。
-
-**四档结论**：`建议投递`（无 unknown 且命中 ≥2）/ `补充材料后投递`（命中 ≥1）/ `谨慎投递`（无命中）/ `暂不建议投递`（有 fail）。
-"已匹配 / 表达缺口 / 证据不足"这类判定需要对着简历原文看，留给对话侧，代码不代劳。
-
-**踩过并已修的三个坑**（各有单测盯着，见 `tests/jobmatch.test.mjs` 的 ★）
-
-1. `splitTerms` 不拆括号时，"<某研究方向>（半导体缺陷…）"整串进词典 → 词典只剩 2 个词 → 全场 0 命中。
-2. 专业门槛正则只写"专业"二字会命中"应用专业方法或工具"这类句子 → HRBP 岗被判专业不符。
-   现在前置式必须带显式标签或冒号，后置式认"…等相关专业"。
-3. `skills.category`（"编程 / 工具"）进词典 → 75 个岗位里 38 个靠"工具""编程"假命中。现在只用 `content`。
-
-**已知边界（不是 bug）**
-
-- `private/profile.md` 的节编号与 schema 顺序错位（md 第 5 节是技能，schema 第 5 节是实习经历），
-  `--import` 会整段错位；当前 `--screen` 是现场导入不落盘，所以技能段与求职意向段为空 →
-  词典偏小、意向城市 unknown。CLI 会把这类告警打出来，修档请走 `--ui` 或修正 md 编号。
-- 列表接口不含岗位详情页 URL，`/position/<id>/` 实测是 404 页 → `url` 留空，不猜拼法；
-  交接靠岗位 `id` + 在页面上打开。
-- 词典只来自档案自己写下的词。档案没写的技能不会凭空命中，这是刻意的。
-
-## 十三、ATS 简历 PDF 模组（2026-09-22 落地）
-
-> **默认不启用（用户决策，2026-09-23）。** 理由：很多网站重新上传简历时会**重新解析并覆盖
-> 表单里已有的内容**，而这份 PDF 的定位恰恰是"传一次、让解析器回填"。所以它只在
-> ① 目标表单全空 ② 使用者明确要求 这两种情况下才调用 —— 不在常规填表流程里默认生成或上传。
-> 命令没变，改的是**默认流程**（§七 硬规则）。
-
-独立于引擎的档案侧模组。背景：多数招聘网站支持「上传简历 → 自动解析 → 回填表单」，
-比逐字段灌网页可靠；面向 HR 的排版简历压缩字段导致解析失败，所以生成一份
-**完整、未压缩、机器可读**的版本供上传。
-
-| 文件 | 职责 |
-| --- | --- |
-| `scripts/resume-pdf.mjs` | CLI：`node scripts/resume-pdf.mjs [--version <名>] [--font <ttf/ttc>] [--versions]` |
-| `tests/resume-pdf.test.mjs` | node:test 6 例：组装齐全 / 四类排除 / 空姓名报错 / 空区段不出标题 / PDF 抽回比对 / 路径守卫 |
-
-产出 `private/resume/resume-ats.pdf`（投放版本口径为 `resume-ats-<名>.pdf`，复用
-`resolveValues` 的基准 ⊕ 覆盖）。依赖：`pdfkit`（运行时生成）+ `pdf-parse`（devDep，测试抽回比对）。
-
-**版式决定**：单栏纯文本流，无表格 / 图片 / 分栏 / 页眉页脚；区段标题用 schema 区段标签；
-每个字段都带「标签：值」；日期保持档案原值不缩写；页眉两行放 ATS 高频字段
-（性别 / 出生日期 / 政治面貌 / 现居住城市；电话 / 邮箱 / GitHub / ORCID）。
-中文必须内嵌带 ToUnicode 的 CJK 字体才能被抽出 —— 候选字体逐个试开
-（本机实测 Hiragino / PingFang 的 TTC 未过探测，落到 Arial Unicode.ttf），全败时报错要求 `--font`。
-
-**整段排除（显式决定，不是遗漏）**：never 类（证件号码）、紧急联系人（第三方个人信息）、
-常见长文本答案（表单答案不是简历内容）、附件清单（本机路径）。
-教育条目头行把 `degree + programType` 合并显示；描述 / 成果保留逐行编号原样。
-
-**已知副作用（2026-09-23 实测于方正 PCB / 北森，成因未确证）**：上传后站内解析把**本科行拆成了两行** ——
-「培养类型」（`programType`）被当成专业名占一行，「真正的专业名」另起一行且无学校名称。
-疑似成因就是这个"头行合并显示"：解析器把合并串切成了两个专业。后果明确 —— 教育经历多出一行，
-而引擎**没有 `deleteRow`**，删行只能人工。下次动这行版式时，把 `degree` 与 `programType`
-拆成两个可见字段再复验一次。
-
-**验收（2026-09-22）**：`npm test` 88/88；真实档案 152 个非空值（排除上述四类后）逐一比对，
-抽回文本 152/152 命中；空区段（实习 / 工作经历）不出标题。输出强制 `<root>/private/` 内，
-stdout 只回路径与计数、不回显字段值。
-
----
-
-## 十四、Element Plus 型站点：新凯来 `career.sicarrier.com`（2026-09-24 实测）
-
-Vue 3 + **Element Plus** 的校招站，与已有四种适配器（Moka / 北森 / 飞书 / generic）都不同：
-字段盒子是 `.el-form-item` + `.el-form-item__label`，**页面上没有 `.form-item`** →
-`filltext.mjs` 的 `pickField` 与 `choose.mjs` 在这一站**直接不适用**，本轮四个区（基本信息 /
-项目经历 / 教育经历 / 发表论文）全部靠一次性脚本完成。表单在 `#/createCampus`（先到 `#/center`
-点「创建简历」才会出现），左侧导航是**分区渲染**，切换只渲染当前区。
-
-### 已实测的交互规律（可直接复用）
-
-| 字段类型 | 写入 | 回读 |
-| --- | --- | --- |
-| text / textarea | 原生 setter + `input` + `change` | `el.value` |
-| date（`el-date-picker`） | 同上 + `keydown Enter` + `blur` | `el.value` |
-| select（`el-select`） | 点 `.el-select__wrapper` 开 → 可见下拉里精确匹配文本 → `hit.click()` | ★ `.el-select__wrapper.innerText` |
-| 远程搜索 select | 开 → wrapper 内 input 写关键词 → 等 ~1.5s → 精确匹配 | 同上 |
-| radio（是/否） | 点 `.el-radio__label` | `.el-radio.is-checked`（**不可取消**，改选只能点另一项） |
-
-- 读下拉选项：取**所有可见** `.el-select-dropdown`（`offsetParent !== null`）再匹配。
-  **不要用 `aria-controls` / `aria-expanded` 关联**——实测会串到别的下拉（把排名+学历的选项读成"学校所在地"的）。
-- **回读铁律**：el-select 的选中值读 `.el-select__wrapper.innerText`。读组件内部子节点
-  （`.el-select__selected-item`）在某些字段拿到空串，会把"已选成功"误判成"失败"。
-  判据是"人眼看到的那个文本在哪个节点"，不是结构上更该在那儿的节点。
-- 每选完一个 select，下拉会自行关闭；**不要连击多个 select**。
-- **「新增」按钮每次生效需 ≥1.5s**，连点会丢（实测连点 3 次只加 1 行）。
-- **删除行会弹 `el-message-box` 确认框**，不点「确定」就再点删除 → 弹窗**叠加**、行数不变（实测叠到 5 个）。
-- 动态字段：`学历` 选中「博士研究生」后，行内**多出** `本科直博或硕博连读`（是/否），选区换代后才会出现。
-- 该站 `论文详情` textarea 有 **500 字上限**（输入框右下角有 `n/500` 计数器）。
-
-### ★ 本轮踩到并已纠正的两处（别再退回）
-
-1. **切分区的点击会被弹窗吞掉**：`el.click()` 返回成功，但若此时有 message-box 挡着，
-   分区根本没切——**必须靠"该区特征 label 集合是否变化"验证**，不能信 click 的返回值。
-2. **「保存」不是存草稿**：切区时弹的「是否保存当前变更内容？（取消 / 保存）」，点**保存**会直接走
-   提交校验，回执是「当前表单必填字段未填写完整，请补充后再提交」（这个回执只有「确定」一个按钮）。
-   结论：**在通过校验的「保存并提交」之前，所有填写都只在页面内存里，刷新即丢**。
-
-### 可优化点（本轮暴露，按触发条件排序；未实现的不写代码）
-
-| # | 问题（有实证） | 建议 | 触发条件 |
-| --- | --- | --- | --- |
-| 1 | 控件定位与回读**没有跨框架抽象**：`filltext.mjs` 硬编码北森 `.form-item`，遇到 `.el-form-item` 就等于每次重写一次性脚本（本轮 4 个区、约 20 个临时脚本） | 抽 `tools/dom.mjs`：`boxes(root, framework)` + `readDisplay(el)`（select→`wrapper.innerText` / radio→`.is-checked` / 其余→`value`） | **再遇到第二个 Element Plus 站点**——只有一个站点时抽象等于猜 |
-| 2 | 回读口径不统一导致**误判"写入失败"**并重复点击（学校所在地那次） | 见上表「回读铁律」；`readDisplay` 落地时把这条写成单测 | 与 #1 同一批 |
-| 3 | **落库语义没有在动手前先探一次**：填完 4 个区才发现「保存」= 提交校验、数据只在内存 | 新站点开工第一步探「提交路径」：找入口 → 点一次 → 读回执 → 明确告知用户"是否已落库 / 能不能刷新"。写进 §2.6 的开工清单 | **立即适用**（纯纪律，零代码） |
-| 4 | **有后果的点击没有闭环**：删行不点确认会叠加弹窗；新增连点会丢行 | 点击 → 等 → 读回执/计数 → 校验，**四步同脚本完成**；校验未过不发第二次同类点击 | 立即适用 |
-| 5 | 切区**没有内容级验证**（见上「踩到两处」第 1 条） | 切区后必读一次特征 label 集合 | 立即适用 |
-| 6 | 值**本可以经终端/对话回显**：本轮靠"node 读档案 → 拼进 evaluate → 只打印长度与 ok"规避 | 把这个模式固化成脚本骨架（如 `scripts/evalcode.mjs`），避免每次手写；注意值仍会出现在 HTTP body 与页面里，属必要暴露 | 第三次手写同一段样板时 |
-| 7 | **按 label 出现序号寻址行**（`label#n` 口径）本轮在 3 行教育 / 4 行项目 / 7 行论文上全部有效，但只写在 `choose.mjs` 里 | 提升为跨框架公共约定写进文档，与 #1 一并落地 | 与 #1 同一批 |
-| 8 | **"某类条目不想投"靠手工删行**（本轮删掉 3 行审稿中论文，要逐行点删除 + 确认框） | 用已有的**投放版本（overrides）**机制承载，例如版本里声明只投「已发表」 | 第二次遇到"某类条目不想投" |
-| 9 | 给 `publications` 加字段时**只改 schema 会让测试变红**（`tests/profile.test.mjs` 断言"schema 每个字段都能在 `docs/profile-template.md` 找到"） | 这是测试在正确工作：**加字段必须 schema + 模板两处同改**。已在同一提交内修好 | 立即适用（已固化为事实） |
-
-### 本轮交付（供对照）
-
-- 基本信息 / 项目经历（4 行）/ 教育经历（3 行）/ 发表论文（先 7 行、后按用户要求删到 4 行已发表）均已填并逐项回读。
-- 档案侧：`publications` 新增 `publishDate` 字段（schema + 模板同步，提交 `047ca2c`）；用户偏好
-  **"简历只写已发表"**（档案仍保留审稿中的条目，"写不写"在填表时决定）。
-- 未提交：必填区（求职意向 / 语言情况 / 亲属信息）与教育区 3 处「学习成绩排名」未填，
-  该站校验不放行，故数据尚未落库。
+| `AGENTS.md`（本文件） | 每次启动 |
+| `docs/privacy.md` | 动提交 / 推送 / 档案写入规则时（项目身份与三层闸门全文） |
+| `docs/discipline.md` | 判断"这个改动到底要不要做"时（十条纪律的论证与案例） |
+| `docs/bridge.md` | 用桥接驱动浏览器时（前台硬前提、后台写通道、静默错写纪律、探测工具） |
+| `docs/stations.md` | 遇到新站点 / 改适配器时（各站实测事实，含 Element Plus 新站点） |
+| `docs/engine-api.md` | 调 `__ja.*` 接口或改引擎时（API、字段 ID 格式、降级链、同步方案） |
+| `docs/modules.md` | 用 jobmatch 筛岗位、或生成 ATS 简历 PDF 时 |
+| `docs/history.md` | 想知道"当初为什么是这个决定"时（含各 Phase 验收明细） |
+| `docs/plans/` | 找规划原文（05 是路线图事实源、06 是档案界面事实源） |
+| `CHANGELOG.md` | 看版本与已知未完成 |

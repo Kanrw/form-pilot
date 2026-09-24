@@ -4,6 +4,29 @@
 版本策略：0.x 起步，新适配器 / 新能力 bump minor，修 bug bump patch。
 **条目重点记录适配器的实测站点与日期** —— 适配器会随站点改版失效，日期比功能描述更重要。
 
+## [Unreleased]
+
+### 新增
+
+- 档案：`publications` 增加**发表日期**字段（`publishDate`，`YYYY-MM-DD`）。
+  schema 与 `docs/profile-template.md` 的字段位必须同时改 —— `tests/profile.test.mjs` 有
+  「schema 里每个字段都能在模板里找到」的断言盯着这条。
+- 站点：**Element Plus 型站点**（新凯来 `career.sicarrier.com`，实测 2026-09-24）的完整交互规律
+  与坑，见 `docs/stations.md`。
+
+### 文档
+
+- **AGENTS.md 拆分（2026-09-24）**：原 993 行的单文件按性质拆为「启动必读主文件 + 7 个全文附文件」，
+  主文件压到 ~220 行。动机是**启动成本**：原文件里约一半篇幅是查阅型规格（引擎 API、字段 ID、
+  适配器表）与历史实测档案，每次启动都要读一遍。
+  - 新增：`docs/privacy.md`（项目身份 · 隐私边界 · 三层闸门）、`docs/discipline.md`（工作纪律全文）、
+    `docs/bridge.md`（桥接基础设施 · 前台硬前提 · 静默错写纪律）、`docs/stations.md`（适配器注册表 +
+    各站实测）、`docs/engine-api.md`（引擎 API · 字段 ID · 降级链 · 同步方案）、
+    `docs/modules.md`（jobmatch · ATS 简历 PDF）、`docs/history.md`（已完成工作 · 各 Phase 验收明细）
+  - **原文一字未删，只是搬家**；**章节号沿用原编号**，主文件顶部给出「旧章节 → 新位置」对照表，
+    文中「见 §X」按该表换算
+  - 校验：拆完用脚本逐行比对，原文的实义行（去空白后 ≥15 字符）在新结构里命中率 100%
+
 ## [0.1.0] — 2026-09-23
 
 首个可公开分发的版本：引擎 + 三个站点适配器 + 档案体系 + 岗位筛选 + ATS 简历 PDF，
