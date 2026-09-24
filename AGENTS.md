@@ -213,7 +213,7 @@ form-pilot/
 | `docs/privacy.md` | 动提交 / 推送 / 档案写入规则时（项目身份与三层闸门全文） |
 | `docs/discipline.md` | 判断"这个改动到底要不要做"时（十条纪律的论证与案例） |
 | `docs/bridge.md` | 用桥接驱动浏览器时（前台硬前提、后台写通道、静默错写纪律、探测工具） |
-| `docs/stations.md` | 遇到新站点 / 改适配器时（各站实测事实，含 Element Plus 新站点） |
+| `docs/stations.md` | 遇到新站点 / 改适配器时（各站实测事实；§十四 Element Plus 型新凯来、§十五 华为自研 `aui-` 型） |
 | `docs/engine-api.md` | 调 `__ja.*` 接口或改引擎时（API、字段 ID 格式、降级链、同步方案） |
 | `docs/modules.md` | 用 jobmatch 筛岗位、或生成 ATS 简历 PDF 时 |
 | `docs/history.md` | 想知道"当初为什么是这个决定"时（含各 Phase 验收明细） |
