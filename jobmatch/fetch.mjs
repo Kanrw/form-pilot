@@ -50,38 +50,43 @@ export async function fetchJobs({ url, session, limit = 200, waitMs = 12000 }) {
   const target = bumpLimit(url, limit);
 
   await bridge('network', { cmd: 'start' }, session);
-  await bridge('navigate', { url: target }, session);
-
-  const deadline = Date.now() + waitMs;
   let wanted = [];
   let all = [];
-  while (Date.now() < deadline) {
-    await sleep(1200);
-    const list = await bridge('network', { cmd: 'list' }, session);
-    all = list.requests || [];
-    wanted = all.filter(
-      (r) => r.status === 200 && (site ? site.apiPattern.test(r.url) : String(r.mimeType || '').includes('json'))
-    );
-    if (wanted.length) break;
-  }
-
   const jobs = [];
   const errors = [];
-  for (const req of wanted) {
-    let detail;
-    try {
-      detail = await bridge('network', { cmd: 'detail', requestId: req.requestId }, session);
-    } catch (e) {
-      errors.push(`detail 失败 ${req.requestId}：${e.message}`);
-      continue;
-    }
-    const body = detail && detail.body;
-    if (!body) continue;
-    const parsed = site ? site.parse(body) : sniffJobs(body);
-    if (parsed.length) jobs.push(...parsed);
-  }
+  // ★ 抓包必须成对收尾。原先 stop 写在函数末尾：导航失败、站点改版让 parse 抛错，
+  //   或 detail 一路失败提前 return，录制都会留在后台，下一个 session 的 network list
+  //   里就混进上一页的请求 —— 表现为"抓到了别人的岗位"，比报错难查得多。
+  try {
+    await bridge('navigate', { url: target }, session);
 
-  await bridge('network', { cmd: 'stop' }, session);
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      await sleep(1200);
+      const list = await bridge('network', { cmd: 'list' }, session);
+      all = list.requests || [];
+      wanted = all.filter(
+        (r) => r.status === 200 && (site ? site.apiPattern.test(r.url) : String(r.mimeType || '').includes('json'))
+      );
+      if (wanted.length) break;
+    }
+
+    for (const req of wanted) {
+      let detail;
+      try {
+        detail = await bridge('network', { cmd: 'detail', requestId: req.requestId }, session);
+      } catch (e) {
+        errors.push(`detail 失败 ${req.requestId}：${e.message}`);
+        continue;
+      }
+      const body = detail && detail.body;
+      if (!body) continue;
+      const parsed = site ? site.parse(body) : sniffJobs(body);
+      if (parsed.length) jobs.push(...parsed);
+    }
+  } finally {
+    await bridge('network', { cmd: 'stop' }, session).catch(() => {});
+  }
 
   // id 重复时用 #n 消歧：id 是后续回查岗位的 key，重名会串岗。
   const seen = new Map();
