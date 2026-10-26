@@ -81,6 +81,18 @@ export const tagName = (run, i) => `${run}${i}`;
 
 const unwrap = (v) => { let g = 0; while (typeof v === 'string' && g++ < 4) { try { v = JSON.parse(v); } catch { break; } } return v; };
 
+// 页内定位片段 —— 只写一次，写入前定位（②）与回读定位（④）共用它。
+// 两处各写一份时，改了一份就等于"读写两边定位到不同的盒子"，那正是本文件头上
+// 记的静默错写的成因（读写都错到一处，报告还显示已验证）。`pickField` 是同一规则的
+// jsdom 版（有单测），改这里的判据时两处必须一起改。
+const LOCATE_JS = `
+    const items = [...document.querySelectorAll(".form-item")];
+    const lab = x => { const l = x.querySelector('label'); const s = l ? norm(l.innerText || l.textContent || '') : ''; const i = s.indexOf(String.fromCharCode(10)); return i < 0 ? s : s.slice(0, i); };
+    const boxesOf = p => items.filter(x => lab(x) === norm(p.label));
+    const boxOf = p => boxesOf(p)[(p.index || 1) - 1];
+    const inputsOf = it => [...it.querySelectorAll('input, textarea')].filter(e => e.offsetWidth || e.offsetHeight);
+`;
+
 async function main() {
   const session = flagOne('--session', null);
   let pairs = flagAll('--set').map(parseSet);
@@ -122,14 +134,12 @@ async function main() {
   const tagged = await evalIn(`
     const pairs = ${JSON.stringify(pairs)};
     const run = ${JSON.stringify(run)};
-    const items = [...document.querySelectorAll(".form-item")];
-    const lab = x => { const l = x.querySelector('label'); const s = l ? norm(l.innerText || l.textContent || '') : ''; const i = s.indexOf(String.fromCharCode(10)); return i < 0 ? s : s.slice(0, i); };
+${LOCATE_JS}
     const out = [];
     pairs.forEach((p, i) => {
-      const boxes = items.filter(x => lab(x) === norm(p.label));
-      const it = boxes[(p.index || 1) - 1];
-      if (!it) { out.push({ key: p.key, err: 'box-not-found', found: boxes.length }); return; }
-      const ins = [...it.querySelectorAll('input, textarea')].filter(e => e.offsetWidth || e.offsetHeight);
+      const it = boxOf(p);
+      if (!it) { out.push({ key: p.key, err: 'box-not-found', found: boxesOf(p).length }); return; }
+      const ins = inputsOf(it);
       if (ins.length !== 1) { out.push({ key: p.key, err: 'composite-or-none', n: ins.length }); return; }
       const tag = run + i;
       ins[0].setAttribute('${TAG_ATTR}', tag);
@@ -155,13 +165,11 @@ async function main() {
   // ④ 回读：按 label 重新定位（**不用标记选择器** —— 那正是读写两边错到一起的原因）
   const back = await evalIn(`
     const pairs = ${JSON.stringify(pairs)};
-    const items = [...document.querySelectorAll('.form-item')];
-    const lab = x => { const l = x.querySelector('label'); const s = l ? norm(l.innerText || l.textContent || '') : ''; const i = s.indexOf(String.fromCharCode(10)); return i < 0 ? s : s.slice(0, i); };
+${LOCATE_JS}
     return JSON.stringify(pairs.map((p) => {
-      const boxes = items.filter(x => lab(x) === norm(p.label));
-      const it = boxes[(p.index || 1) - 1];
+      const it = boxOf(p);
       if (!it) return { key: p.key, err: 'box-not-found' };
-      const ins = [...it.querySelectorAll('input, textarea')].filter(e => e.offsetWidth || e.offsetHeight);
+      const ins = inputsOf(it);
       return { key: p.key, val: ins.length === 1 ? norm(ins[0].value).slice(0, 60) : '(n=' + ins.length + ')' };
     }));
   `);

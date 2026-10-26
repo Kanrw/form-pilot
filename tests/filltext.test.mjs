@@ -6,9 +6,22 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
 import { pickField, parseSet, tagName, norm } from '../scripts/filltext.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// 页内定位片段必须只有一份：写入前定位与回读定位各写一份时，改了其中一份就是
+// "读写两边定位到不同盒子"——那正是本文件要防的静默错写。这条断言锁住结构，不测行为。
+test('定位片段只写一次：两处共用 LOCATE_JS，页内不出现第二份 label 判据', () => {
+  const src = readFileSync(join(ROOT, 'scripts/filltext.mjs'), 'utf8');
+  assert.equal(src.split('${LOCATE_JS}').length - 1, 2, '写入前定位与回读定位必须都用 LOCATE_JS');
+  assert.equal(src.split('const lab = x =>').length - 1, 1, 'label 判据在页内代码里只许出现一次');
+});
 
 // jsdom 里 offsetWidth/offsetHeight 恒为 0；用桩显式声明"可见"，与 tests/helpers 同法
 function makeDom(html) {
