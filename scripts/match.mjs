@@ -118,7 +118,9 @@ function renderReport(res, meta) {
 
 // ── 主流程 ────────────────────────────────────────────────
 const flags = parseArgs(process.argv.slice(2));
-const root = flags.root ? resolve(flags.root) : ROOT;
+// `--root` 不带值时 parseArgs 给的是 true，直接 resolve(true) 会抛 TypeError 打出一段堆栈 ——
+// 与 profile.mjs / resume-pdf.mjs 同口径：只有给了值才认，否则退回仓库根。
+const root = flags.root && flags.root !== true ? resolve(String(flags.root)) : ROOT;
 const paths = resolvePaths(root);
 
 if (flags.help || (!flags.fetch && !flags.screen && !flags.sites)) {
