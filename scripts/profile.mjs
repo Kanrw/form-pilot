@@ -499,7 +499,6 @@ function run(argv) {
   if (flags.ui) {
     const port = Number(flags.port && flags.port !== true ? flags.port : 8787);
     const ctx = createContext({ root: paths.root, toolsDir });
-    ctx.defaultVersion = flags.version && flags.version !== true ? String(flags.version) : '';
     const server = createServer(createHandler(ctx));
     server.on('error', (e) => {
       out({ ok: false, error: e.code === 'EADDRINUSE' ? 'port-in-use' : 'listen-failed', message: e.message, port });

@@ -8,10 +8,9 @@
 //   3. stdout 不回显字段值，只回标签与计数。
 //      命名失败：值出现在终端回滚缓冲、日志、或贴进对话的那一刻，档案就出了 private/。
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { readdirSync } from 'node:fs';
 import {
   AUTOFILL,
   OVERRIDABLE_KEYS,
@@ -28,8 +27,6 @@ import {
   validateOverrides,
   normalizeLabel,
   sectionByIndex,
-  sectionOf,
-  validateValues,
 } from './profile.schema.mjs';
 
 export function resolvePaths(root = process.cwd()) {
@@ -638,4 +635,7 @@ export function summarize(values) {
   };
 }
 
-export { counts, isEmptyValue, sectionOf, validateValues };
+// 只转出调用方真正 import 的名字（profile.mjs 用 counts，resume-pdf 用 isEmptyValue）。
+// 曾把 sectionOf / validateValues 也一并转出，两处零引用 —— 转出口一多，
+// "这个函数到底谁在用"就得全仓搜一遍才知道。
+export { counts, isEmptyValue };

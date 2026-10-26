@@ -651,7 +651,6 @@
         .then(function (result) {
           if (result.status !== 200) { setSaveState('读取失败：' + (result.body.error || result.status)); return null; }
           state.baseValues = result.body.values;
-          state.defaultVersion = result.body.version || '';
           applyProfile(result.body);
           // 服务进程的 schema 是启动时加载的：改完 schema 不重启，界面会继续用旧规则校验，
           // 报出来的错对不上文件内容，看起来像代码 bug。

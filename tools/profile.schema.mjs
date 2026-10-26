@@ -297,10 +297,6 @@ for (const section of SECTIONS) {
   }
 }
 
-export function flatFields() {
-  return FLAT;
-}
-
 export function sectionOf(key) {
   return SECTIONS.find((s) => s.key === key) || null;
 }
@@ -338,10 +334,6 @@ export function emptyValues() {
 // 「投放版本」被允许覆盖的字段白名单。这是硬边界：
 // 白名单外的键出现在版本文件里，--check 与 PUT 都直接报错。
 export const OVERRIDABLE_KEYS = new Set(FLAT.filter((x) => x.overridable && !x.repeatable).map((x) => x.flat));
-
-export function isOverridable(key) {
-  return OVERRIDABLE_KEYS.has(key);
-}
 
 export function isEmptyValue(v) {
   return v === null || v === undefined || String(v).trim() === '';
@@ -498,11 +490,4 @@ export function manualList(values) {
     else if (field.autofill === 'confirm' && isEmptyValue(value)) out.push({ key, label, reason: '需逐项确认，留空' });
   });
   return out;
-}
-
-// 给浏览器的高亮/红字用：把校验结果按 section[].field 形状索引。
-export function indexIssues(list) {
-  const map = {};
-  for (const issue of list) map[issue.key] = issue;
-  return map;
 }
