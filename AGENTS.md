@@ -123,9 +123,9 @@
 
 **已落盘**：`engine/`（2）、`scripts/`（10：status / inject / probe / capture-fixture / filltext /
 choose / profile / match / resume-pdf / check-private-leak）、
-`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（13：engine.test / profile.test /
+`tools/`（5：档案 schema、I/O、界面三件套）、`tests/`（14：engine.test / profile.test /
 jobmatch.test / probe.test / resume-pdf.test / golden.test / choose.test / privacy.test /
-filltext.test / inject.test + jsdom 桩 + fixture + 人工清单）、`docs/`（plans 00–07 + profile-template）。
+filltext.test / inject.test / fetch.test + jsdom 桩 + fixture + 人工清单）、`docs/`（plans 00–07 + profile-template）。
 **已落盘（2026-09-23 补）**：README / LICENSE(MIT+上游署名) / CHANGELOG。
 **已落盘（2026-09-23 再补，隐私闸门）**：`.githooks/`（pre-commit 扫暂存区、pre-push 扫工作树）、
 `.github/workflows/privacy.yml`（服务端模式判据）。见 §一 三层闸门。

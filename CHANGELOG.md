@@ -20,6 +20,29 @@
     （本站是 `.aui-input__count-inner` 字数计数器），否则挡不住"只改了 DOM 表层、保存时被旧 state 覆盖"
     这类静默错写
 
+### 修复
+
+- `scripts/resume-pdf.mjs`：失败时退出码是 0 —— `main()` 返回的码没人接，打印 `ok:false` 却退 0，
+  自动化拿不到失败信号。改成与 `profile.mjs` 同一口径。
+- `jobmatch/sites.mjs`：`sniffJobs` 的 `depth` 数的是**出队节点数**，不是层数 —— 宽而浅的 body
+  （几个配置兄弟 + 一个真列表）在第 6 个节点就被截断，岗位列表报空；而空列表会被当成"这站没有岗位"。
+  改成队列元素带层号。
+- `jobmatch/fetch.mjs`：抓包 start/stop 改成 try/finally。原来 stop 写在函数末尾，导航失败或
+  站点 parse 抛错时录制留在后台，下一次 `network list` 会混进上一页的请求。
+- `scripts/match.mjs`：`--root` 不带值时不再 `resolve(true)` 抛堆栈，退回仓库根。
+
+### 重构
+
+- `filltext.mjs`：页内定位片段只留一份 —— 写入前定位（②）与回读定位（④）共用 `LOCATE_JS`。
+  两份一旦漂移就回到"读写两边各定位到一个盒子"的静默错写，而那种错报告里还显示已验证；
+  加一条结构断言（`${LOCATE_JS}` 出现 2 次、页内 label 判据只出现 1 处）盯住它。
+- 清掉零引用的死代码：`GATE_ORDER` / `JOB_SCHEMA_VERSION` / `detectWorkplace`（连它的正则）/
+  `flatFields` / `isOverridable` / `indexIssues` / `sites.pageSizeParam` / `context.defaultVersion`；
+  `profile-io` 的转出口收窄到真有调用方的 `counts` / `isEmptyValue`。
+  保留 `STATUS` 与 `VERDICT`：它们是给对话侧的五态 / 四档契约，不是死人。
+- 测试：新增 `tests/fetch.test.mjs`（假桥断言失败路径仍 stop，3 例）；补 3 条用例
+  （resume-pdf 退出码、sniffJobs 宽 body 能挖到 / 超 6 层不下钻）。
+
 ### 文档
 
 - **AGENTS.md 拆分（2026-09-24）**：原 993 行的单文件按性质拆为「启动必读主文件 + 7 个全文附文件」，
