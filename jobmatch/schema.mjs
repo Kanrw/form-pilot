@@ -7,11 +7,8 @@
 // 与 profile.schema.mjs 的关系：那里管"档案字段怎么定义"，这里管"岗位与结论怎么定义"。
 // 两者通过 values（profile.json 的形状）衔接，jobmatch 不读 private/，只接受传进来的值。
 
-export const JOB_SCHEMA_VERSION = 1;
-
 // 硬门槛结论。unknown ≠ 通过：它是" JD 或档案没给够信息"，不参与淘汰。
 export const GATE = { PASS: 'pass', FAIL: 'fail', UNKNOWN: 'unknown' };
-export const GATE_ORDER = [GATE.FAIL, GATE.UNKNOWN, GATE.PASS];
 
 // 匹配状态（job-match 的五态，一个不多）。代码只校验它，不做判定 —— 判定在对话侧。
 export const STATUS = ['已匹配', '表达缺口', '证据不足', '真实缺口', '待确认'];
@@ -115,14 +112,6 @@ export function detectMajorClause(text) {
     if (terms.length) return { text: raw, terms };
   }
   return null;
-}
-
-// 工作地点：结构化字段优先（站点给的 city），正文兜底。
-const WORKPLACE_RE = /(?:工作地点|工作地|base|Base|办公地点)[^。；;\n]{0,4}[：:是为]?\s*([一-龥A-Za-z]{2,12})/;
-
-export function detectWorkplace(text) {
-  const m = String(text || '').match(WORKPLACE_RE);
-  return m ? m[1].trim() : null;
 }
 
 // ── 岗位与结论 ────────────────────────────────────────────

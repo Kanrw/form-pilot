@@ -48,7 +48,8 @@ export const SITES = {
     apiPattern: /\/api\/v\d+\/search\/job\/posts/,
     hostPattern: /jobs\.feishu\.cn$/,
     // 列表接口一次能取全：把 URL 的 limit 提到 >= 总数即可（实测 limit=100 → 75 条）。
-    pageSizeParam: 'limit',
+    // 参数名固定在 fetch.mjs 的 bumpLimit 里（'limit'），这里不再多存一份 ——
+    // 存了也没人读，改站点时反而会误以为改这里有效。
     parse(body) {
       const list = body && body.data && body.data.job_post_list;
       if (!Array.isArray(list)) return [];

@@ -17,7 +17,6 @@ import {
   detectDegree,
   detectYears,
   detectMajorClause,
-  detectWorkplace,
   isCampusJob,
 } from './schema.mjs';
 
