@@ -13,7 +13,7 @@ import { PDFParse } from 'pdf-parse';
 
 import { emptyValues } from '../tools/profile.schema.mjs';
 import { resolvePaths } from '../tools/profile-io.mjs';
-import { buildBlocks, pickFont, renderPdf } from '../scripts/resume-pdf.mjs';
+import { buildBlocks, main, pickFont, renderPdf } from '../scripts/resume-pdf.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -100,6 +100,13 @@ test('buildBlocks：空区段不产生标题', () => {
   values.experience = [];
   const titles = buildBlocks(values).filter((b) => b.kind === 'section').map((b) => b.title);
   assert.ok(!titles.includes('实习 / 工作经历'));
+});
+
+// ── CLI ─────────────────────────────────────────────────────────────────────
+
+test('main：版本不存在时返回非 0（自动化只认 exit code，打印 ok:false 退 0 等于没报错）', async () => {
+  const paths = tempPaths();
+  assert.equal(await main(['--version', '不存在的版本', '--root', paths.root]), 1);
 });
 
 // ── 端到端：PDF 生成后能被通用抽取器读回 ─────────────────────────────────────

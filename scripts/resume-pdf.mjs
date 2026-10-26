@@ -417,5 +417,8 @@ async function run(argv) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  // 退出码必须带出去：自动化只认 exit code —— 打印 ok:false 却退 0，等于没有失败信号
+  // （同 profile.mjs 尾部的写法；两处口径一不一致，调用方就会踩空）。
+  const code = await main();
+  process.exit(code);
 }
