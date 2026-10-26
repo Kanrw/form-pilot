@@ -17,6 +17,7 @@ import {
 } from '../jobmatch/schema.mjs';
 import { termsFromProfile, screenAll, screenJob, factsFromProfile, decide } from '../jobmatch/filter.mjs';
 import { GATE, VERDICT } from '../jobmatch/schema.mjs';
+import { sniffJobs } from '../jobmatch/sites.mjs';
 
 const PROFILE = {
   education: [
@@ -154,4 +155,19 @@ test('validateJobs 挡住缺 JD 与 id 重复', () => {
   assert.equal(validateJobs([{ title: 'a', jd: 'x' }]).ok, true);
   assert.equal(validateJobs([{ title: 'a' }]).ok, false, '缺 JD 的岗位没法判门槛');
   assert.equal(validateJobs([{ id: '1', title: 'a', jd: 'x' }, { id: '1', title: 'b', jd: 'y' }]).ok, false);
+});
+
+test('sniffJobs：宽而浅的 body 也要能挖到列表（层数 ≠ 出队节点数）', () => {
+  const list = [1, 2, 3].map((i) => ({ title: `岗位${i}`, requirement: `要求${i}` }));
+  // 六个配置兄弟节点排在前面：把"层数"实现成"节点预算"时，第七个 key 根本轮不到被看，
+  // 岗位列表就在那里，却报"没找到"（＝静默的空列表）。
+  const body = { a: {}, b: {}, c: {}, d: {}, e: {}, f: {}, g: { list } };
+  assert.equal(sniffJobs(body).length, 3);
+});
+
+test('sniffJobs：超过 6 层不再下钻，也不把扁平对象当岗位列表', () => {
+  let deep = { list: [1, 2, 3].map((i) => ({ title: `岗位${i}`, requirement: `要求${i}` })) };
+  for (let i = 0; i < 7; i += 1) deep = { nested: deep };
+  assert.equal(sniffJobs(deep).length, 0);
+  assert.equal(sniffJobs({ code: 0, msg: 'ok', data: {} }).length, 0);
 });

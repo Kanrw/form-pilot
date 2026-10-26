@@ -91,11 +91,13 @@ export function detectSite(url) {
 export function sniffJobs(body) {
   if (!body || typeof body !== 'object') return [];
   const seen = new Set();
-  const queue = [body];
-  let depth = 0;
-  while (queue.length && depth < 6) {
-    const node = queue.shift();
-    depth += 1;
+  // 队列元素带层号。原先那个 `depth` 数的是**出队节点数**，不是层数 ——
+  // 结果是一个宽而浅的 body（{a:…,g:{list:[岗位]}}）在第 6 个兄弟节点就被截断，
+  // 岗位列表在后面也没人看。实测这类「一堆配置对象 + 一个真列表」的接口很常见。
+  const queue = [[body, 0]];
+  while (queue.length) {
+    const [node, level] = queue.shift();
+    if (level >= 6) continue;
     if (!node || typeof node !== 'object') continue;
     if (Array.isArray(node)) {
       if (node.length >= 3 && node.every((x) => x && typeof x === 'object')) {
@@ -121,7 +123,7 @@ export function sniffJobs(body) {
     for (const v of Object.values(node)) {
       if (v && typeof v === 'object' && !seen.has(v)) {
         seen.add(v);
-        queue.push(v);
+        queue.push([v, level + 1]);
       }
     }
   }
