@@ -123,6 +123,24 @@ async function main() {
 
   const run = 'f' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
 
+  // 站点守卫：本脚本的定位规则是北森形态（.form-item + label）。在 Moka（apply-field-*）上
+  // 每个字段各报一次 box-not-found，15 条噪声会让人以为"字段名写错了"（2026-10-29 实测一轮全废）。
+  const station = await evalIn(`
+    return JSON.stringify({
+      formItem: document.querySelectorAll('.form-item').length,
+      moka: document.querySelectorAll('[class*=apply-field-]').length,
+    });
+  `);
+  if (!station.formItem) {
+    console.log(JSON.stringify({
+      ok: false, err: 'wrong-station', formItem: 0, mokaFields: station.moka,
+      hint: station.moka
+        ? '这是 Moka 页面：用引擎 __ja.fillTexts（切到前台，或先 Page.bringToFront 开 focus emulation），本脚本不认这套 DOM'
+        : '本脚本只认北森 .form-item 形态',
+    }));
+    process.exit(1);
+  }
+
   // ① 清残留标记（本次静默错写事故的直接原因）
   const cleaned = (await evalIn(`
     let n = 0;
