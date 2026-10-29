@@ -60,7 +60,7 @@ label**——piotech 的 file input 的 `accept` 为空、`label` 为空，但�
 
 | 字段形态 | 通道 | 依据 |
 | --- | --- | --- |
-| 文本 / 文本域 | `fillTexts` **一次打包全部**，不逐条发 | 引擎自带回读（ok/failed/retried） |
+| 文本 / 文本域 | **`filltext.mjs`（桥 `click` 聚焦 + 桥 `fill`）**，`--json` 一次多字段、重名用 `index`。**React 受控站点上不要用引擎 `fillTexts`**——它是页内 JS 设 value + 合成事件，DOM 有值但**不进 React state**，任何重渲染都刷回旧值 | 2026-10-29 piotech 对照实验：同一批字段，`fillTexts` 写的 12 个**分钟级全丢**；`filltext` 写的 12 个经"点开下拉触发重渲染"后**长度全等**（20,21,189,27,51,200,18,38,103,15,39,175） |
 | 日期（可直接输入） | `fillDate`；只有年份的先填 `01` | R4 用户裁定 |
 | Moka 单月（毕业时间） | `fillMonthRange('YYYY-MM')` 不传 to | §16.2 |
 | Moka 普通下拉 | `pickOption` | §16.2 |
