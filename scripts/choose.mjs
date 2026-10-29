@@ -184,6 +184,19 @@ const readbackBody = (name, index) => `
   return JSON.stringify({ display: norm(trig.innerText).slice(0, 60) });
 `;
 
+// 面板内部的虚拟列表只渲染当前窗口的十几项：不滚动就永远够不到后面的选项
+// （2026-10-29 北方华创实测：一级学科、发布年份的目标值都排在首屏之外）。
+// 找滚动容器不靠类名猜，找面板内第一个 scrollHeight 明显大于 clientHeight 的元素。
+const SCROLL_PANEL = `
+  const panel = document.querySelector('.phoenix-selectList');
+  if (!panel) return JSON.stringify({ moved: false });
+  const sc = [panel, ...panel.querySelectorAll('*')].find(e => e.scrollHeight > e.clientHeight + 20 && e.clientHeight > 40);
+  if (!sc) return JSON.stringify({ moved: false });
+  const before = sc.scrollTop;
+  sc.scrollTop = before + Math.floor(sc.clientHeight * 0.8);
+  return JSON.stringify({ moved: sc.scrollTop !== before, atEnd: sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2 });
+`;
+
 const cleanup = () => evalIn(`
   document.querySelectorAll('[data-ch], [${OPT_ATTR}]').forEach(e => { e.removeAttribute('data-ch'); e.removeAttribute('${OPT_ATTR}'); });
   return JSON.stringify({ ok: true });
@@ -249,12 +262,22 @@ export async function listOptions(label, index = 1) {
   const loc = await evalIn(locateBody(label, index));
   if (loc.err) return { ok: false, err: loc.err };
   await bridge('click', { selector: '[data-ch=trig]' });
-  const cands = await openAndCollect('opt');
+  // 虚拟列表要滚到底才看得全；只读首屏会把"选不到"误判成"选项不存在"。
+  const seen = [];
+  let cands = await openAndCollect('opt');
+  for (let i = 0; i < 5; i++) {
+    if (!Array.isArray(cands)) break;
+    seen.push(...cands.map((c) => c.text));
+    const m = await evalIn(SCROLL_PANEL);
+    if (!m.moved) break;
+    cands = await openAndCollect('opt');
+    if (m.atEnd) { if (Array.isArray(cands)) seen.push(...cands.map((c) => c.text)); break; }
+  }
   // 关掉菜单：再点一次触发器（"切换"语义，见 AGENTS §四）
   await bridge('click', { selector: '[data-ch=trig]' });
   await cleanup();
-  if (!Array.isArray(cands)) return { ok: false, err: cands.err };
-  return { ok: true, options: [...new Set(cands.map((c) => c.text))] };
+  if (!Array.isArray(cands) && !seen.length) return { ok: false, err: cands.err };
+  return { ok: true, options: [...new Set(seen)] };
 }
 
 async function chooseOne({ label, index, value }) {
@@ -267,18 +290,32 @@ async function chooseOne({ label, index, value }) {
   await bridge('click', { selector: '[data-ch=trig]' });
 
   const run = 'o' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
-  const cands = await openAndCollect(run);
+  let cands = await openAndCollect(run);
   if (!Array.isArray(cands)) {
     await bridge('click', { selector: '[data-ch=trig]' }); // 收残留菜单
     await cleanup();
     return { field: key, value, ok: false, err: cands.err };
   }
 
-  const pick = chooseCandidate(cands, value);
+  // 目标不在首屏时往下翻再判。虚拟列表只渲染十几项，不滚就只能报 option-not-found，
+  // 而这个报错会被误读成"这站没有这个选项"（2026-10-29 一级学科/发布年份）。
+  let pick = chooseCandidate(cands, value);
+  const seen = cands.map((c) => c.text);
+  for (let i = 0; i < 4 && pick.err === 'option-not-found'; i++) {
+    const m = await evalIn(SCROLL_PANEL);
+    if (!m.moved) break;
+    const next = await openAndCollect(run);
+    if (!Array.isArray(next)) break;
+    seen.push(...next.map((c) => c.text));
+    cands = next;
+    pick = chooseCandidate(cands, value);
+    if (m.atEnd) break;
+  }
+
   if (pick.err) {
     await bridge('click', { selector: '[data-ch=trig]' }); // 收残留菜单
     await cleanup();
-    return { field: key, value, ok: false, err: pick.err, options: (pick.options || []).slice(0, 20) };
+    return { field: key, value, ok: false, err: pick.err, options: [...new Set(seen)].slice(0, 30) };
   }
 
   await bridge('click', { selector: `[${OPT_ATTR}="${pick.tag}"]` });
