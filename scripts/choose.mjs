@@ -195,13 +195,31 @@ const cleanup = () => evalIn(`
 // 关闭动作靠 Escape + body.click，**每次尝试用一次桥往返当等待**（页内定时器会被后台节流，
 // 见文件头），最多 3 次；关不掉就明确报 stale-menu-open 而不是硬着头皮开。
 async function closeOpenPanels() {
+  // "开着"的判据 = 可见 **且** 落在视口内。2026-10-29 北方华创实测：这个页面每个带联想输入的
+  // 下拉都会挂着一个已渲染但定位到页面外的列表（rect.y ≈ -2153），旧判据只看 offsetHeight，
+  // 于是 2 个真容器 + 它们的嵌套子元素被数成 24 → 每个下拉都报 stale-menu-open，全线堵死。
+  // 落在视口外的面板本来也点不到（桥的点击是真实坐标），把它算作"开着"只会挡住自己。
+  // `[class*=phoenix-selectList]` 会同时命中 __contentWraper/__list/__listItem 等子元素，
+  // 所以这里必须锚定到容器类本身。
   const countOpen = () => evalIn(`
-    const n = [...document.querySelectorAll('${SEL.panel}')].filter(e => e.offsetHeight).length;
+    const n = [...document.querySelectorAll('.phoenix-selectList')].filter(e => {
+      if (!e.offsetHeight) return false;
+      const r = e.getBoundingClientRect();
+      return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
+    }).length;
     return JSON.stringify({ n });
   `);
   let n = (await countOpen()).n;
+  if (n > 0) {
+    // 页内合成事件关不掉这类浮层（2026-10-29 实测：学校名称的联想层是 common-unmodeled-layer，
+    // Escape / body.click / blur 全无效）。改成**真实坐标点一下无关区域** —— 同一手段一次就关掉了。
+    // 目标选字段标题的 label：北森页面上它既不可点也不需要焦点，点它没有副作用。
+    try { await bridge('click', { selector: '.form-item__title label' }); } catch { /* 页面没有标题时跳过 */ }
+    n = (await countOpen()).n;
+  }
   for (let i = 0; i < 3 && n > 0; i++) {
     await evalIn(`
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       document.body.click();
       return JSON.stringify({ ok: true });
