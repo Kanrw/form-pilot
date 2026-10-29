@@ -8,6 +8,9 @@
 
 ### 新增
 
+- 文档：`docs/stations.md` §十六 **五站实战复盘**（华虹 / 兆易 / 北方华创 / 寒武纪 / 中微，2026-10-23 ~ 10-29）——
+  三条读数铁律、六条站点差异、四条流程条款。核心结论：**假"已填"比假"空"危险**，
+  拿不准的读数一律报空。
 - 档案：`publications` 增加**发表日期**字段（`publishDate`，`YYYY-MM-DD`）。
   schema 与 `docs/profile-template.md` 的字段位必须同时改 —— `tests/profile.test.mjs` 有
   「schema 里每个字段都能在模板里找到」的断言盯着这条。
@@ -22,6 +25,19 @@
 
 ### 修复
 
+- `engine.js`：**choice 类型的读数取的是第一个选项文本，不是选中态** —— 2026-10-29 北方华创实测，
+  13 个未选单选（性别、疾病史、违法记录…）全被 scan 报成"已填"，`emptyRequired` 整片漏报，
+  会让人交出一份空必填的表。改为只认 `radioCheckedSel` 的选中项，没有判据就报空；
+  同时把 `readSelect` 的叶子兜底收窄为"仅唯一候选时采信"（选项常驻的盒子里，取第一个就是假已填）。
+- `engine.js`：**Moka `string_info` 的真值在 `sd-Input-display-value`，`input.value` 恒为空** ——
+  已填的学校/专业名称被报成空（2026-10-23 华虹、10-28 兆易各一次）。text 类改为"input 有值先用
+  input，空才看 display"，并排除纯国家码（手机号盒的 display 只有 `+86`）。
+- `engine.js`：复合字段（addon `+86` + 号码框）在 `numberInputSel` 失配时回读到 addon。改为取
+  "值最长且非国家码"的 input；写入仍按 `composite-field` 拒绝 —— 读得到和写得对分开处置。
+- `scripts/filltext.mjs`：入口加站点守卫。在 Moka 上跑会给每个字段各报一次 `box-not-found`
+  （15 条噪声，让人以为字段名写错了），现在直接报 `wrong-station` 并指向引擎。
+- `scripts/choose.mjs`：虚拟列表只渲染首屏十几项，选不到就报 `option-not-found` —— 被误读成
+  "这站没有这个选项"（2026-10-29 一级学科、发布年份）。改为面板内滚动后再判；`--options` 同步收全量。
 - `scripts/resume-pdf.mjs`：失败时退出码是 0 —— `main()` 返回的码没人接，打印 `ok:false` 却退 0，
   自动化拿不到失败信号。改成与 `profile.mjs` 同一口径。
 - `jobmatch/sites.mjs`：`sniffJobs` 的 `depth` 数的是**出队节点数**，不是层数 —— 宽而浅的 body
