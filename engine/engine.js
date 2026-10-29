@@ -186,31 +186,59 @@ function pickInput(box) {
     const role = box.querySelector(A.numberInputSel);
     if (role && inputs.includes(role)) return { inp: role, composite: false };
   }
-  return { inp: inputs[0] || null, composite: true };
+  // 复合字段回读取"值最长"的那个：装饰性 addon（+86）永远短于真值，写死取第一个
+  // 会在号码已填时读成空（2026-10-28 兆易实测）。写入仍按 composite 拒（fillTexts 看这个标志），
+  // 这里只服务回读 —— 找不到角色选择器时，"读得到"和"写得对"必须分开处置。
+  // 纯国家码要先剔掉：addon 的 input 里本身就存着 "+86"（不是空），
+  // 不过滤的话号码未填时反而读到它（2026-10-29 补测）。
+  const real = inputs.filter((i) => !/^\+\d{1,4}$/.test((i.value || '').trim()));
+  const longest = real.slice().sort((a, b) => (b.value || '').length - (a.value || '').length)[0];
+  return { inp: longest || inputs[0] || null, composite: true };
 }
+
+// 占位文本不是值。北森的 valueSel 就是 placeHolder 元素（空值时文本为"请选择"），
+// 直接返回会把空字段报成已填 —— 与 choice 的假"已填"同一后果（emptyRequired 漏报）。
+const PLACEHOLDER = /^(请选择|请输入|select|--.*--)$/i;
 
 function readSelect(box) {
   if (A.valueSel) {
     const v = box.querySelector(A.valueSel);
-    if (v) return v.textContent.trim();
+    const t = v ? v.textContent.trim() : '';
+    if (t && !PLACEHOLDER.test(t)) return t;
   }
   const inp = box.querySelector(A.textInputSel);
   if (inp && inp.value) return inp.value;
   const cand = [...box.querySelectorAll('span,div')]
     .filter((s) => s.children.length === 0 && s.offsetHeight > 0)
     .map((s) => s.textContent.trim())
-    .filter((t) => t && !/请选择|select/i.test(t) && norm(t) !== norm(labelOf(box)));
-  return cand[0] || '';
+    .filter((t) => t && !PLACEHOLDER.test(t) && norm(t) !== norm(labelOf(box)));
+  // 兜底只在**唯一**候选时采信。盒内叶子文本常常就是选项列表本身（单选/复选常驻），
+  // 取第一个等于把第一个选项当成选中值 —— 2026-10-29 北方华创 13 个未选单选全部由此误报。
+  return cand.length === 1 ? cand[0] : '';
 }
 
 function valueOf(box, type) {
+  if (type === 'choice') {
+    // "已填"只能是选中态，不能从文本推。没有 checked 判据就报空 —— 宁可人工看一眼。
+    if (!A.radioCheckedSel) return '';
+    const items = [...box.querySelectorAll(A.radioItemSel || '*')];
+    const on = items.filter((x) => x.querySelector(A.radioCheckedSel));
+    return on.length === 1 ? on[0].textContent.trim() : '';
+  }
   if (type === 'text' || type === 'textarea') {
     // ★ 回读必须走 pickInput，不能各自 querySelector（见 pickInput 上的注释）。
     //   失败实例：Moka「手机号码」盒 = addon(+86) + 号码框两个 input，
     //   `box.querySelector(textInputSel)` 命中的是 addon 那个空的 ——
     //   值已经写进号码框了，scan 却报空，还把必填项列进 emptyRequired。
     const inp = pickInput(box).inp;
-    return inp ? inp.value : '';
+    const v = inp ? inp.value : '';
+    if (v) return v;
+    // Moka 的 string_info（学校名称/专业名称）：真值渲染在 sd-Input-display-value，
+    // input.value 恒为空。只在 input 空时看 display，并排除纯国家码 ——
+    // 手机号盒的 display 只有 "+86"，那不是值（2026-10-23 华虹、10-28 兆易各踩一次）。
+    const d = A.valueSel ? box.querySelector(A.valueSel) : null;
+    const t = d ? d.textContent.trim() : '';
+    return /^\+\d{1,4}$/.test(t) ? '' : t;
   }
   if (type === 'file') {
     const f = box.querySelector(A.fileSel);

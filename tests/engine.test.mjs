@@ -516,3 +516,56 @@ test('★ 手机号盒（addon + 号码框）：回读与写入都定位号码�
   assert.equal(ins[0].value, '+86', 'addon 框不能被写入');
   assert.equal(ins[1].value, '13800000000');
 });
+
+// ★ 2026-10-29 北方华创实测：北森单选是 div.phoenix-radio，选项常驻盒内。
+//   修之前 readSelect 的兜底取"第一个叶子文本"= 第一个选项，于是 13 个未选单选全被报成
+//   "已填"（性别=男、疾病史=是…），emptyRequired 整片漏报 —— 会让人交出一份空必填的表。
+test('★ 北森 choice 读数：未选中报空，不许把第一个选项当已填', async () => {
+  const dom = makeDom(BEISEN_HTML);
+  const ja = loadEngine(dom, { adapter: 'beisen' });
+  const read = () => JSON.parse(ja.scan()).fields.find((f) => f.id === '性别').value;
+
+  assert.equal(read(), '', '未选中的单选必须报空');
+  mockPhoenixRadio(dom);
+  await ja.setChoice('性别', '男');
+  assert.equal(read(), '男', '选中后报的是选中项');
+});
+
+// ★ 2026-10-23 华虹 / 10-28 兆易实测：Moka 的 string_info（学校/专业名称）真值渲染在
+//   sd-Input-display-value，input.value 恒为空。只看 input 会把已填字段报成空（假阳性）。
+const MOKA_DISPLAY_HTML = `
+<div>
+  <div class="apply-field-string_info">
+    <div class="title">学校名称</div>
+    <input class="sd-Input-input" value="">
+    <span class="sd-Input-display-value">示例大学</span>
+  </div>
+  <div class="apply-field-string_info">
+    <div class="title">专业名称</div>
+    <input class="sd-Input-input" value="">
+    <span class="sd-Input-display-value"></span>
+  </div>
+</div>`;
+
+test('★ Moka 联想输入：值在 display 不在 input.value，不许报成空', () => {
+  const s = JSON.parse(loadEngine(makeDom(MOKA_DISPLAY_HTML)).scan());
+  const byLabel = Object.fromEntries(s.fields.map((f) => [f.label, f]));
+  assert.equal(byLabel['学校名称'].value, '示例大学');
+  assert.equal(byLabel['专业名称'].value, '', '空 display 仍是空');
+});
+
+// 同一条判据的边界：display 只有国家码时不能当值 —— 手机号盒的 display 是 "+86"。
+test('★ 手机号盒：display 只有 +86 且号码未填时，回读必须是空', () => {
+  const dom = makeDom(PHONE_HTML.replace('placeholder="请输入手机号"', 'placeholder="请填写手机号"')
+    .replace('value="13800001234"', 'value=""'));
+  const f = JSON.parse(loadEngine(dom).scan()).fields.find((x) => x.label.indexOf('手机号码') === 0);
+  assert.equal(f.value, '', '+86 不是号码');
+});
+
+// numberInputSel 没命中（站点改了 placeholder）时，回读退到"值最长的 input"：
+// 号码框 11 位、addon 2 位，取错就会读成 +86 或空。写入仍按 composite 拒，两者互不牵连。
+test('★ 复合字段回读：没有 numberInputSel 命中时读值最长的 input，不读 +86', () => {
+  const dom = makeDom(PHONE_HTML.replace('placeholder="请输入手机号"', 'placeholder="请填写手机号"'));
+  const f = JSON.parse(loadEngine(dom).scan()).fields.find((x) => x.label.indexOf('手机号码') === 0);
+  assert.equal(f.value, '13800001234');
+});
